@@ -95,17 +95,28 @@ type: custom:aroma-link-schedule-card
 That's it! The card will:
 - **Auto-discover** all your Aroma-Link devices
 - Display a **7×5 schedule matrix** for each device
-- Show **green cells** for enabled programs with times
-- Allow **clicking any cell** to load that day/program into the editor
-- Include an **inline editor** with all schedule fields
-- Provide **Save** and **Sync** buttons
+- **Multi-cell selection** - click cells to select, click P# row header to select all 7 days
+- **Bulk editing** - changes apply to all selected cells at once
+- **Overlap validation** - warns if schedules would conflict on the same day
+- **Green cells** = enabled programs with times displayed
+- **Blue highlight** = selected cells ready for editing
+
+### How to Use
+
+1. **Select cells**: Click individual cells, or click P1-P5 row headers to select entire row
+2. **Edit values**: Change enabled, start/end times, work/pause, level in the editor below
+3. **Save**: Click "Save to Aroma-Link" to push changes to all selected cells
+4. **Pull**: Click "Pull Current Schedule" to refresh from Aroma-Link app
+
+### Overlap Warning
+
+The card validates schedules before saving. If you try to enable a program that overlaps with another enabled program on the same day, you'll see a warning. Aroma-Link may have issues with overlapping time ranges.
 
 ### Optional Configuration
 
 ```yaml
 type: custom:aroma-link-schedule-card
 device: main_house    # Filter to specific device (optional)
-show_editor: true     # Show inline editor (default: true)
 ```
 
 ### Manual Resource Registration (if needed)
@@ -879,14 +890,30 @@ A: Yes! Each day (Monday-Sunday) has its own set of 5 programs. When you edit a 
 
 ## Version History
 
-- **1.6.0** (This fork): Auto-Registered Custom Schedule Card
+- **1.6.1** (This fork): Enhanced Schedule Card UX
+  - Card title now shows "Device Name Diffuser"
+  - Compact cell display with smaller text
+  - Detailed instructions in card header
+  - "Level A/B/C" verbose labels instead of "LA/LB/LC"
+  - Removed Day/Program dropdowns (not needed with multi-select)
+  - Better overlap error message: "Schedules in Sun, Mon are overlapping..."
+  - **Today highlight** - current day column is highlighted amber
+  - **Hover tooltips** - shows full details (work/pause duration) on hover
+  - **Time validation** - ensures end time is after start time
+  - **Loading state** - visual feedback during save
+  - **Success/error messages** - confirmation toasts after actions
+  - **Select All / Clear All** quick action buttons
+  - **Level color coding** - different tints for A (green), B (amber), C (red)
+  - Styled toggle switch for enabled/disabled
+  - Native time picker inputs
+- **1.6.0** (This fork): Auto-Registered Custom Schedule Card with Multi-Select
   - New custom Lovelace card (`aroma-link-schedule-card`) with interactive 7×5 matrix
+  - **Multi-cell selection**: Click cells to select, click P# row to select all days for that program
+  - **Bulk editing**: Apply changes to all selected cells at once
+  - **Overlap validation**: Prevents conflicting schedules on the same day
   - **Auto-discovery**: Card automatically finds all Aroma-Link devices
   - **Zero configuration**: Just add `type: custom:aroma-link-schedule-card`
   - **Auto-registered**: No manual frontend resource installation required
-  - Inline editor with all schedule fields (day, program, times, work/pause, level)
-  - Direct interaction - no pop-ups, edit values directly in the card
-  - Save and Sync buttons integrated into the card
 - **1.5.0** (This fork): Schedule Matrix Dashboard
   - Added bulk schedule fetch (`refresh_all_schedules` service)
   - Added `set_editor_program` service for dashboard card integration
