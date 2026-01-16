@@ -26,7 +26,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "button", "number", "sensor", "schedule"]
+PLATFORMS = ["switch", "button", "number", "sensor", "workset"]
 
 SET_SCHEDULER_SCHEMA = vol.Schema({
     vol.Required(ATTR_WORK_DURATION): vol.All(vol.Coerce(int), vol.Range(min=5, max=900)),
@@ -49,6 +49,7 @@ async def _cleanup_old_helpers(hass: HomeAssistant, device_name: str):
     helper_prefix = f"aromalink_{device_name.lower().replace(' ', '_').replace('-', '_')}"
     entity_registry = er.async_get(hass)
     removed_count = 0
+    config_entry_ids = set()
     
     # List of helper entity IDs to remove
     helper_entities = []
@@ -67,12 +68,14 @@ async def _cleanup_old_helpers(hass: HomeAssistant, device_name: str):
     # Also remove day selector if it exists
     helper_entities.append(f"input_select.{helper_prefix}_selected_day")
     
-    # Remove entities from registry and state
+    # Remove entities from registry and state, and collect helper config entries
     for entity_id in helper_entities:
         # Remove from entity registry if it exists
         registry_entity = entity_registry.async_get(entity_id)
         if registry_entity:
             try:
+                if registry_entity.config_entry_id:
+                    config_entry_ids.add(registry_entity.config_entry_id)
                 entity_registry.async_remove(entity_id)
                 _LOGGER.debug(f"Removed helper entity from registry: {entity_id}")
                 removed_count += 1
@@ -89,8 +92,26 @@ async def _cleanup_old_helpers(hass: HomeAssistant, device_name: str):
             except Exception as e:
                 _LOGGER.warning(f"Failed to remove {entity_id} from state: {e}")
     
-    if removed_count > 0:
-        _LOGGER.info(f"Cleaned up {removed_count} old helper entities for {device_name} (prefix: {helper_prefix})")
+    # Remove helper config entries (this actually deletes helpers so they don't come back)
+    for entry_id in config_entry_ids:
+        config_entry = hass.config_entries.async_get_entry(entry_id)
+        if config_entry and config_entry.domain in {
+            "input_boolean",
+            "input_datetime",
+            "input_number",
+            "input_select",
+        }:
+            try:
+                await hass.config_entries.async_remove(entry_id)
+                _LOGGER.debug(f"Removed helper config entry: {entry_id}")
+            except Exception as e:
+                _LOGGER.warning(f"Failed to remove helper config entry {entry_id}: {e}")
+
+    if removed_count > 0 or config_entry_ids:
+        _LOGGER.info(
+            f"Cleaned up old helper entities for {device_name} "
+            f"(prefix: {helper_prefix}, entities: {removed_count}, entries: {len(config_entry_ids)})"
+        )
     else:
         _LOGGER.debug(f"No old helper entities found for {device_name} (prefix: {helper_prefix})")
 

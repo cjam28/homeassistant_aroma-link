@@ -1,4 +1,4 @@
-"""Schedule platform for Aroma-Link."""
+"""Workset platform for Aroma-Link."""
 import logging
 
 from homeassistant.components.select import SelectEntity
@@ -17,18 +17,20 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up Aroma-Link schedule entities based on a config entry."""
+    """Set up Aroma-Link workset entities based on a config entry."""
     data = hass.data[DOMAIN][entry.entry_id]
     device_coordinators = data["device_coordinators"]
-    
+    _LOGGER.info("Setting up workset entities for %s devices", len(device_coordinators))
+
     entities = []
     for device_id, coordinator in device_coordinators.items():
         device_info = coordinator.get_device_info()
         device_name = device_info["name"]
-        
+        _LOGGER.info("Creating workset entities for %s (%s)", device_name, device_id)
+
         # Program selector
         entities.append(AromaLinkProgramSelector(coordinator, entry, device_id, device_name))
-        
+
         # Editor fields (one set per device, shows current program)
         entities.append(AromaLinkProgramEnabled(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkProgramStartTime(coordinator, entry, device_id, device_name))
@@ -36,21 +38,21 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkProgramWorkDuration(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkProgramPauseDuration(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkProgramLevel(coordinator, entry, device_id, device_name))
-        
+
         # Day selection switches (one per day)
         day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         for day_num, day_name in enumerate(day_names):
             entities.append(AromaLinkProgramDaySwitch(coordinator, entry, device_id, device_name, day_num, day_name))
-        
+
         # Save button
         entities.append(AromaLinkSaveProgramButton(coordinator, entry, device_id, device_name))
-    
+
     async_add_entities(entities)
 
 
 class AromaLinkProgramSelector(CoordinatorEntity, SelectEntity):
     """Program selector entity (1-5)."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize the program selector."""
         super().__init__(coordinator)
@@ -61,27 +63,27 @@ class AromaLinkProgramSelector(CoordinatorEntity, SelectEntity):
         self._unique_id = f"{entry.data['username']}_{device_id}_program_selector"
         self._current_program = 1  # Default to Program 1
         self._current_day = 0  # Default to Monday
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def options(self):
         """Return the options."""
         return ["1", "2", "3", "4", "5"]
-    
+
     @property
     def current_option(self):
         """Return the current option."""
         return str(self._current_program)
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -91,7 +93,7 @@ class AromaLinkProgramSelector(CoordinatorEntity, SelectEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_select_option(self, option: str):
         """Select a program."""
         self._current_program = int(option)
@@ -101,7 +103,7 @@ class AromaLinkProgramSelector(CoordinatorEntity, SelectEntity):
         # Load schedule for current day if not cached
         if self.coordinator._current_day not in self.coordinator._schedule_cache:
             await self.coordinator.async_refresh_schedule(self.coordinator._current_day)
-    
+
     def _get_current_program_data(self):
         """Get data for currently selected program from cache."""
         if self._current_day not in self.coordinator._schedule_cache:
@@ -114,7 +116,7 @@ class AromaLinkProgramSelector(CoordinatorEntity, SelectEntity):
 
 class AromaLinkProgramEnabled(CoordinatorEntity, SwitchEntity):
     """Program enabled/disabled switch."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
@@ -124,29 +126,29 @@ class AromaLinkProgramEnabled(CoordinatorEntity, SwitchEntity):
         self._name = f"{device_name} Program Enabled"
         self._unique_id = f"{entry.data['username']}_{device_id}_program_enabled"
         self._program_selector = None
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def is_on(self):
         """Return if enabled."""
         program_num = self.coordinator._current_program
         day = self.coordinator._current_day
-        
+
         if day in self.coordinator._schedule_cache:
             schedule = self.coordinator._schedule_cache[day]
             if len(schedule) >= program_num:
                 return schedule[program_num - 1].get("enabled", 0) == 1
         return False
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -156,7 +158,7 @@ class AromaLinkProgramEnabled(CoordinatorEntity, SwitchEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_turn_on(self, **kwargs):
         """Enable the program."""
         # Store locally, will be saved when Save button is pressed
@@ -169,7 +171,7 @@ class AromaLinkProgramEnabled(CoordinatorEntity, SwitchEntity):
             if len(schedule) >= program_num:
                 schedule[program_num - 1]["enabled"] = 1
         self.async_write_ha_state()
-    
+
     async def async_turn_off(self, **kwargs):
         """Disable the program."""
         program_num = self.coordinator._current_program
@@ -183,13 +185,9 @@ class AromaLinkProgramEnabled(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-# Similar pattern for other editor entities - I'll create simplified versions
-# In a real implementation, these would need to coordinate with the program selector
-# For now, let me create a more complete implementation that stores editor state
-
 class AromaLinkProgramStartTime(CoordinatorEntity, TextEntity):
     """Program start time (HH:MM format)."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
@@ -201,17 +199,17 @@ class AromaLinkProgramStartTime(CoordinatorEntity, TextEntity):
         self._attr_native_min = 0
         self._attr_native_max = 5  # "23:59" is 5 chars
         self._attr_pattern = r"^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"  # HH:MM format
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def native_value(self):
         """Return the current time as HH:MM string."""
@@ -222,7 +220,7 @@ class AromaLinkProgramStartTime(CoordinatorEntity, TextEntity):
             if len(schedule) >= program_num:
                 return schedule[program_num - 1].get("start_time", "00:00")
         return "00:00"
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -232,7 +230,7 @@ class AromaLinkProgramStartTime(CoordinatorEntity, TextEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_set_value(self, value):
         """Set the start time."""
         # Validate format
@@ -252,7 +250,7 @@ class AromaLinkProgramStartTime(CoordinatorEntity, TextEntity):
 
 class AromaLinkProgramEndTime(CoordinatorEntity, TextEntity):
     """Program end time (HH:MM format)."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
@@ -264,17 +262,17 @@ class AromaLinkProgramEndTime(CoordinatorEntity, TextEntity):
         self._attr_native_min = 0
         self._attr_native_max = 5  # "23:59" is 5 chars
         self._attr_pattern = r"^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"  # HH:MM format
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def native_value(self):
         """Return the current time as HH:MM string."""
@@ -285,7 +283,7 @@ class AromaLinkProgramEndTime(CoordinatorEntity, TextEntity):
             if len(schedule) >= program_num:
                 return schedule[program_num - 1].get("end_time", "23:59")
         return "23:59"
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -295,7 +293,7 @@ class AromaLinkProgramEndTime(CoordinatorEntity, TextEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_set_value(self, value):
         """Set the end time."""
         # Validate format
@@ -315,7 +313,7 @@ class AromaLinkProgramEndTime(CoordinatorEntity, TextEntity):
 
 class AromaLinkProgramWorkDuration(CoordinatorEntity, NumberEntity):
     """Program work duration."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
@@ -328,17 +326,17 @@ class AromaLinkProgramWorkDuration(CoordinatorEntity, NumberEntity):
         self._attr_native_max_value = 900
         self._attr_native_step = 1
         self._attr_native_unit_of_measurement = "sec"
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def native_value(self):
         """Return the current value."""
@@ -349,7 +347,7 @@ class AromaLinkProgramWorkDuration(CoordinatorEntity, NumberEntity):
             if len(schedule) >= program_num:
                 return float(schedule[program_num - 1].get("work_sec", 10))
         return 10.0
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -359,7 +357,7 @@ class AromaLinkProgramWorkDuration(CoordinatorEntity, NumberEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_set_native_value(self, value):
         """Set the work duration."""
         program_num = self.coordinator._current_program
@@ -375,7 +373,7 @@ class AromaLinkProgramWorkDuration(CoordinatorEntity, NumberEntity):
 
 class AromaLinkProgramPauseDuration(CoordinatorEntity, NumberEntity):
     """Program pause duration."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
@@ -388,17 +386,17 @@ class AromaLinkProgramPauseDuration(CoordinatorEntity, NumberEntity):
         self._attr_native_max_value = 900
         self._attr_native_step = 5
         self._attr_native_unit_of_measurement = "sec"
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def native_value(self):
         """Return the current value."""
@@ -409,7 +407,7 @@ class AromaLinkProgramPauseDuration(CoordinatorEntity, NumberEntity):
             if len(schedule) >= program_num:
                 return float(schedule[program_num - 1].get("pause_sec", 120))
         return 120.0
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -419,7 +417,7 @@ class AromaLinkProgramPauseDuration(CoordinatorEntity, NumberEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_set_native_value(self, value):
         """Set the pause duration."""
         program_num = self.coordinator._current_program
@@ -435,7 +433,7 @@ class AromaLinkProgramPauseDuration(CoordinatorEntity, NumberEntity):
 
 class AromaLinkProgramLevel(CoordinatorEntity, SelectEntity):
     """Program consistency level."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
@@ -444,22 +442,22 @@ class AromaLinkProgramLevel(CoordinatorEntity, SelectEntity):
         self._device_name = device_name
         self._name = f"{device_name} Program Level"
         self._unique_id = f"{entry.data['username']}_{device_id}_program_level"
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def options(self):
         """Return the options."""
         return ["A", "B", "C"]
-    
+
     @property
     def current_option(self):
         """Return the current option."""
@@ -472,7 +470,7 @@ class AromaLinkProgramLevel(CoordinatorEntity, SelectEntity):
                 level_map = {1: "A", 2: "B", 3: "C"}
                 return level_map.get(level, "A")
         return "A"
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -482,7 +480,7 @@ class AromaLinkProgramLevel(CoordinatorEntity, SelectEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_select_option(self, option: str):
         """Select a level."""
         program_num = self.coordinator._current_program
@@ -499,7 +497,7 @@ class AromaLinkProgramLevel(CoordinatorEntity, SelectEntity):
 
 class AromaLinkProgramDaySwitch(CoordinatorEntity, SwitchEntity):
     """Day selection switch (one per day)."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name, day_num, day_name):
         """Initialize."""
         super().__init__(coordinator)
@@ -510,22 +508,22 @@ class AromaLinkProgramDaySwitch(CoordinatorEntity, SwitchEntity):
         self._day_name = day_name
         self._name = f"{device_name} Program Day {day_name}"
         self._unique_id = f"{entry.data['username']}_{device_id}_program_day_{day_num}"
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def is_on(self):
         """Return if day is selected."""
         return self._day_num in self.coordinator._selected_days
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -535,14 +533,14 @@ class AromaLinkProgramDaySwitch(CoordinatorEntity, SwitchEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_turn_on(self, **kwargs):
         """Select this day."""
         if self._day_num not in self.coordinator._selected_days:
             self.coordinator._selected_days.append(self._day_num)
             self.coordinator._selected_days.sort()
         self.async_write_ha_state()
-    
+
     async def async_turn_off(self, **kwargs):
         """Deselect this day."""
         if self._day_num in self.coordinator._selected_days:
@@ -552,7 +550,7 @@ class AromaLinkProgramDaySwitch(CoordinatorEntity, SwitchEntity):
 
 class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
     """Save Program button."""
-    
+
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
@@ -561,17 +559,17 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
         self._device_name = device_name
         self._name = f"{device_name} Save Program"
         self._unique_id = f"{entry.data['username']}_{device_id}_save_program"
-    
+
     @property
     def name(self):
         """Return the name."""
         return self._name
-    
+
     @property
     def unique_id(self):
         """Return unique ID."""
         return self._unique_id
-    
+
     @property
     def device_info(self):
         """Return device information."""
@@ -581,12 +579,12 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
-    
+
     async def async_press(self):
         """Save the program to selected days."""
         program_num = self.coordinator._current_program
         selected_days = self.coordinator._selected_days
-        
+
         # For each selected day, fetch current schedule, replace program, save
         work_time_lists = {}
         for day in selected_days:
@@ -595,7 +593,7 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
             if not schedule:
                 _LOGGER.error(f"Failed to fetch schedule for day {day}")
                 continue
-            
+
             # Replace the selected program in the schedule
             schedule[program_num - 1] = {
                 "enabled": schedule[program_num - 1].get("enabled", 0),
@@ -605,7 +603,7 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
                 "pause_sec": schedule[program_num - 1].get("pause_sec", 120),
                 "level": schedule[program_num - 1].get("level", 1),
             }
-            
+
             # Convert to API format
             work_time_list = []
             for prog in schedule:
@@ -618,9 +616,9 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
                     "workDuration": str(prog.get("work_sec", 10)),
                     "pauseDuration": str(prog.get("pause_sec", 120))
                 })
-            
+
             work_time_lists[day] = work_time_list
-        
+
         # Save to all selected days at once
         # The API accepts multiple days, so we can send all at once
         if work_time_lists:
