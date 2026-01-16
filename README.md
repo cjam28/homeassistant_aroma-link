@@ -73,6 +73,50 @@ After setup, open the integration options to configure:
 - Polling interval (1–30 minutes)
 - Debug logging toggle
 
+## Custom Schedule Card (Auto-Registered)
+
+The integration includes a custom Lovelace card that displays an interactive 7-day × 5-program schedule matrix. **No manual installation required!**
+
+### Automatic Registration
+
+When you install the integration:
+1. The custom card JavaScript file is automatically served
+2. The card resource is registered with Lovelace
+3. Just add the card to your dashboard - no HACS frontend install needed
+
+### Using the Card
+
+Add this to any dashboard:
+
+```yaml
+type: custom:aroma-link-schedule-card
+```
+
+That's it! The card will:
+- **Auto-discover** all your Aroma-Link devices
+- Display a **7×5 schedule matrix** for each device
+- Show **green cells** for enabled programs with times
+- Allow **clicking any cell** to load that day/program into the editor
+- Include an **inline editor** with all schedule fields
+- Provide **Save** and **Sync** buttons
+
+### Optional Configuration
+
+```yaml
+type: custom:aroma-link-schedule-card
+device: main_house    # Filter to specific device (optional)
+show_editor: true     # Show inline editor (default: true)
+```
+
+### Manual Resource Registration (if needed)
+
+If the auto-registration doesn't work, manually add the resource:
+
+1. Go to **Settings** → **Dashboards** → **Resources** (⋮ menu)
+2. Click **Add Resource**
+3. URL: `/aroma_link_integration/aroma-link-schedule-card.js`
+4. Type: **JavaScript Module**
+
 ## Services
 
 The integration provides the following services:
@@ -835,6 +879,14 @@ A: Yes! Each day (Monday-Sunday) has its own set of 5 programs. When you edit a 
 
 ## Version History
 
+- **1.6.0** (This fork): Auto-Registered Custom Schedule Card
+  - New custom Lovelace card (`aroma-link-schedule-card`) with interactive 7×5 matrix
+  - **Auto-discovery**: Card automatically finds all Aroma-Link devices
+  - **Zero configuration**: Just add `type: custom:aroma-link-schedule-card`
+  - **Auto-registered**: No manual frontend resource installation required
+  - Inline editor with all schedule fields (day, program, times, work/pause, level)
+  - Direct interaction - no pop-ups, edit values directly in the card
+  - Save and Sync buttons integrated into the card
 - **1.5.0** (This fork): Schedule Matrix Dashboard
   - Added bulk schedule fetch (`refresh_all_schedules` service)
   - Added `set_editor_program` service for dashboard card integration

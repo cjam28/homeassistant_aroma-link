@@ -28,6 +28,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkSignalStrengthSensor(coordinator, entry, device_id, device_info["name"]))
         entities.append(AromaLinkFirmwareVersionSensor(coordinator, entry, device_id, device_info["name"]))
         entities.append(AromaLinkLastUpdateSensor(coordinator, entry, device_id, device_info["name"]))
+        entities.append(AromaLinkScheduleMatrixSensor(coordinator, entry, device_id, device_info["name"]))
     
     async_add_entities(entities)
 
@@ -276,3 +277,55 @@ class AromaLinkLastUpdateSensor(AromaLinkSensorBase):
             ["updateTime", "lastUpdate", "lastUpdateTime", "update_time", "updateTimestamp"],
         )
         return _parse_timestamp(value)
+
+
+class AromaLinkScheduleMatrixSensor(AromaLinkSensorBase):
+    """Sensor exposing the full schedule matrix as attributes for dashboard cards."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the schedule matrix sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            device_id,
+            device_name,
+            "Schedule Matrix",
+            icon="mdi:calendar-clock",
+        )
+
+    @property
+    def native_value(self):
+        """Return number of days with cached schedules."""
+        return len(self.coordinator._schedule_cache)
+
+    @property
+    def extra_state_attributes(self):
+        """Return the full schedule matrix as attributes."""
+        day_names = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+        matrix = {}
+        
+        for day_num in range(7):
+            day_name = day_names[day_num]
+            if day_num in self.coordinator._schedule_cache:
+                programs = self.coordinator._schedule_cache[day_num]
+                day_data = {}
+                for prog_num, prog in enumerate(programs, 1):
+                    day_data[f"program_{prog_num}"] = {
+                        "enabled": prog.get("enabled", 0) == 1,
+                        "start": prog.get("start_time", "00:00"),
+                        "end": prog.get("end_time", "23:59"),
+                        "work": prog.get("work_sec", 10),
+                        "pause": prog.get("pause_sec", 120),
+                        "level": ["A", "B", "C"][prog.get("level", 1) - 1] if prog.get("level") in [1, 2, 3] else "A",
+                    }
+                matrix[day_name] = day_data
+            else:
+                matrix[day_name] = None
+        
+        return {
+            "matrix": matrix,
+            "current_day": self.coordinator._current_day,
+            "current_program": self.coordinator._current_program,
+            "selected_days": self.coordinator._selected_days,
+            "device_id": self.coordinator.device_id,
+        }

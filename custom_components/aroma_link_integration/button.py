@@ -20,6 +20,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkRunButton(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkSaveSettingsButton(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkSaveProgramButton(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkSyncSchedulesButton(coordinator, entry, device_id, device_name))
     
     async_add_entities(entities)
 
@@ -223,3 +224,41 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
         self.coordinator.async_update_listeners()
 
 
+class AromaLinkSyncSchedulesButton(CoordinatorEntity, ButtonEntity):
+    """Sync Schedules with Aroma-Link button."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Sync Schedules"
+        self._unique_id = f"{entry.data['username']}_{device_id}_sync_schedules"
+        self._attr_icon = "mdi:cloud-sync"
+
+    @property
+    def name(self):
+        """Return the name of the button."""
+        return self._name
+
+    @property
+    def unique_id(self):
+        """Return a unique ID for this entity."""
+        return self._unique_id
+
+    @property
+    def device_info(self):
+        """Return device information about this Aroma-Link device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self.coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_press(self):
+        """Fetch all schedules from the Aroma-Link API."""
+        _LOGGER.info("Syncing all schedules with Aroma-Link for device %s", self.coordinator.device_id)
+        await self.coordinator.async_fetch_all_schedules()
+        self.coordinator.async_update_listeners()
+        _LOGGER.info("Schedule sync complete for device %s", self.coordinator.device_id)

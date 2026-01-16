@@ -36,7 +36,7 @@ class AromaLinkProgramStartTime(CoordinatorEntity, TextEntity):
         self._unique_id = f"{entry.data['username']}_{device_id}_program_start_time"
         self._attr_native_min = 0
         self._attr_native_max = 5  # "23:59" is 5 chars
-        self._attr_pattern = r"^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"  # HH:MM format
+        self._attr_pattern = r"^([0-1]?[0-9]|2[0-4]):[0-5][0-9]$"  # HH:MM format (allows 24:00)
 
     @property
     def name(self):
@@ -97,7 +97,7 @@ class AromaLinkProgramEndTime(CoordinatorEntity, TextEntity):
         self._unique_id = f"{entry.data['username']}_{device_id}_program_end_time"
         self._attr_native_min = 0
         self._attr_native_max = 5  # "23:59" is 5 chars
-        self._attr_pattern = r"^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"  # HH:MM format
+        self._attr_pattern = r"^([0-1]?[0-9]|2[0-4]):[0-5][0-9]$"  # HH:MM format (allows 24:00)
 
     @property
     def name(self):

@@ -17,7 +17,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkSwitch(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkFanSwitch(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkProgramEnabled(coordinator, entry, device_id, device_name))
-        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
         for day_num, day_name in enumerate(day_names):
             entities.append(AromaLinkProgramDaySwitch(coordinator, entry, device_id, device_name, day_num, day_name))
     

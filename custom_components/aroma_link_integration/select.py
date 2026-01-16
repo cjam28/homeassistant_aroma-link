@@ -153,13 +153,13 @@ class AromaLinkProgramDaySelector(CoordinatorEntity, SelectEntity):
         self._name = f"{device_name} Program Day"
         self._unique_id = f"{entry.data['username']}_{device_id}_program_day_selector"
         self._day_names = [
+            "Sunday",
             "Monday",
             "Tuesday",
             "Wednesday",
             "Thursday",
             "Friday",
             "Saturday",
-            "Sunday",
         ]
 
     @property
