@@ -893,15 +893,15 @@ class AromaLinkScheduleCard extends HTMLElement {
     for (const [entityId, state] of Object.entries(this._hass.states)) {
       if (entityId.startsWith('sensor.') && entityId.endsWith('_schedule_matrix')) {
         const attrs = state.attributes || {};
-        if (attrs.schedule_matrix) {
-          const deviceName = entityId.replace('sensor.', '').replace('_schedule_matrix', '');
-          sensors.push({
-            entityId,
-            deviceName,
-            deviceId: attrs.device_id,
-            matrix: attrs.schedule_matrix
-          });
-        }
+        // The sensor provides "matrix" attribute
+        // Include even if matrix is empty (schedules not yet fetched)
+        const deviceName = entityId.replace('sensor.', '').replace('_schedule_matrix', '');
+        sensors.push({
+          entityId,
+          deviceName,
+          deviceId: attrs.device_id,
+          matrix: attrs.matrix || {}
+        });
       }
     }
     return sensors;
