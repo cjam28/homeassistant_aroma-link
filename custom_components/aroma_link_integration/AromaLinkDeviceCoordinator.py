@@ -16,7 +16,16 @@ _LOGGER = logging.getLogger(__name__)
 class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
     """Coordinator for handling device data and control."""
 
-    def __init__(self, hass, auth_coordinator, device_id, device_name, update_interval_seconds=60):
+    def __init__(
+        self,
+        hass,
+        auth_coordinator,
+        device_id,
+        device_name,
+        update_interval_seconds=60,
+        save_oil_state_cb=None,
+        oil_state=None,
+    ):
         """Initialize the device coordinator."""
         self.hass = hass
         self.auth_coordinator = auth_coordinator
@@ -58,7 +67,14 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             "usage_rate": None,  # ml per work-second (calculated)
             "calibrated": False,  # Has calibration been done?
             "calibration_runtime": 0,  # Runtime at calibration point
+            "fill_date": None,  # YYYY-MM-DD
+            "calibration_state": "Idle",  # Idle, Running, Ready to Finalize, Calibrated
         }
+
+        self._save_oil_state_cb = save_oil_state_cb
+
+        if oil_state:
+            self._apply_oil_state(oil_state)
 
         super().__init__(
             hass,
@@ -134,6 +150,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             "Reset oil tracking for device %s. Baseline pumpCount: %s",
             self.device_id, self._baseline_pump_count
         )
+        self._request_oil_state_save()
     
     def _log_oil_event(self, event_type: str, details: str):
         """Log an oil tracking event for debugging."""
@@ -145,6 +162,31 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
         if len(self._oil_events) > 50:
             self._oil_events = self._oil_events[-50:]
         _LOGGER.debug(f"Oil event [{self.device_id}] {event_type}: {details}")
+
+    def _request_oil_state_save(self):
+        """Request persistence of oil tracking/calibration state."""
+        if not self._save_oil_state_cb:
+            return
+        self.hass.async_create_task(self._save_oil_state_cb())
+
+    def _apply_oil_state(self, oil_state):
+        """Apply persisted oil state to coordinator."""
+        if not isinstance(oil_state, dict):
+            return
+
+        self._oil_tracking_active = oil_state.get("oil_tracking_active", self._oil_tracking_active)
+        self._oil_tracking_start_time = oil_state.get("oil_tracking_start_time", self._oil_tracking_start_time)
+        self._baseline_pump_count = oil_state.get("baseline_pump_count", self._baseline_pump_count)
+        self._accumulated_work_seconds = oil_state.get("accumulated_work_seconds", self._accumulated_work_seconds)
+        self._completed_cycles = oil_state.get("completed_cycles", self._completed_cycles)
+        self._prev_work_duration = oil_state.get("prev_work_duration", self._prev_work_duration)
+        self._prev_pause_duration = oil_state.get("prev_pause_duration", self._prev_pause_duration)
+
+        calibration = oil_state.get("calibration", {})
+        if isinstance(calibration, dict):
+            for key in self._oil_calibration:
+                if key in calibration:
+                    self._oil_calibration[key] = calibration[key]
     
     def update_oil_tracking(
         self,
@@ -242,6 +284,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 self.device_id, self._completed_cycles, 
                 work_seconds_to_add, self._accumulated_work_seconds
             )
+            self._request_oil_state_save()
         
         # Update previous state for next poll
         self._prev_device_on = device_on
@@ -283,6 +326,8 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             "current_work_duration": self._prev_work_duration,
             "current_pause_duration": self._prev_pause_duration,
             "recent_events": self._oil_events[-10:] if self._oil_events else [],
+            "calibration_state": self._oil_calibration.get("calibration_state", "Idle"),
+            "fill_date": self._oil_calibration.get("fill_date"),
         }
     
     def get_oil_events_log(self):
@@ -316,37 +361,158 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             if key in self._oil_calibration:
                 self._oil_calibration[key] = value
         _LOGGER.debug("Oil calibration updated: %s", self._oil_calibration)
+        self._request_oil_state_save()
     
     def perform_oil_calibration(self):
-        """Calculate usage rate from fill volume, measured remaining, and runtime.
-        
-        Call this after user enters measured_remaining value.
-        Returns the calculated usage rate in ml/second of work time.
+        """Backward-compatible calibration call (now uses finalize)."""
+        return self.finalize_calibration()
+
+    def get_calibration_state(self):
+        """Return the current calibration state."""
+        return self._oil_calibration.get("calibration_state", "Idle")
+
+    def set_calibration_state(self, state):
+        """Set calibration state and update tracking behavior."""
+        valid_states = {"Idle", "Running", "Ready to Finalize", "Calibrated"}
+        if state not in valid_states:
+            _LOGGER.warning("Invalid calibration state: %s", state)
+            return
+
+        self._oil_calibration["calibration_state"] = state
+
+        # Control tracking behavior based on state
+        if state in {"Running", "Calibrated"}:
+            self._oil_tracking_active = True
+        elif state == "Ready to Finalize":
+            self._oil_tracking_active = False
+        else:  # Idle
+            self._oil_tracking_active = False
+
+        self._request_oil_state_save()
+
+    def start_calibration_measurement(self):
+        """Start a new calibration measurement run."""
+        from datetime import datetime
+
+        self.reset_oil_tracking()
+        self._oil_calibration["calibration_state"] = "Running"
+        self._oil_calibration["measured_remaining"] = 0
+
+        # Update fill date to today
+        self._oil_calibration["fill_date"] = datetime.now().strftime("%Y-%m-%d")
+
+        self._log_oil_event("CAL_START", "Calibration measurement started")
+        self._request_oil_state_save()
+
+    def end_calibration_measurement(self):
+        """End calibration measurement and freeze tracking for finalization."""
+        self._oil_calibration["calibration_state"] = "Ready to Finalize"
+        self._oil_calibration["calibration_runtime"] = self._accumulated_work_seconds
+        self._oil_tracking_active = False
+        self._log_oil_event("CAL_END", "Calibration measurement ended")
+        self._request_oil_state_save()
+
+    def resume_calibration_measurement(self):
+        """Resume a paused calibration measurement."""
+        self._oil_calibration["calibration_state"] = "Running"
+        self._oil_tracking_active = True
+        self._log_oil_event("CAL_RESUME", "Calibration measurement resumed")
+        self._request_oil_state_save()
+
+    def refill_keep_calibration(self):
+        """Refill oil without resetting calibration rate.
+
+        Resets runtime/cycle counters, updates fill volume/date, preserves usage rate.
+        """
+        from datetime import datetime
+
+        capacity = self._oil_calibration["bottle_capacity"]
+        self._oil_calibration["fill_volume"] = capacity
+        self._oil_calibration["measured_remaining"] = 0
+        self._oil_calibration["fill_date"] = datetime.now().strftime("%Y-%m-%d")
+        self._oil_calibration["calibration_runtime"] = 0
+
+        # Preserve usage rate if it exists
+        if self._oil_calibration.get("usage_rate"):
+            self._oil_calibration["calibration_state"] = "Calibrated"
+        else:
+            self._oil_calibration["calibration_state"] = "Idle"
+
+        # Reset runtime tracking
+        self._oil_tracking_active = True
+        self._oil_tracking_start_time = datetime.now().timestamp()
+        self._accumulated_work_seconds = 0.0
+        self._completed_cycles = 0
+        self._oil_events = []
+
+        # Capture baseline
+        if self.data:
+            self._baseline_pump_count = self.data.get("pumpCount", 0)
+
+        self._log_oil_event("REFILL", f"Refilled to {capacity}ml (kept calibration).")
+        self._request_oil_state_save()
+
+    def _validate_calibration_inputs(self):
+        """Validate calibration inputs and minimum consumption.
+
+        Returns (is_valid, message).
         """
         fill_vol = self._oil_calibration["fill_volume"]
         remaining = self._oil_calibration["measured_remaining"]
         runtime = self._accumulated_work_seconds
-        
+
         if runtime <= 0:
-            _LOGGER.warning("Cannot calibrate: no runtime recorded")
-            return None
-        
+            return False, "No runtime recorded"
+        if fill_vol <= 0:
+            return False, "Fill volume must be > 0"
+        if remaining < 0:
+            return False, "Measured remaining cannot be negative"
+
         oil_used = fill_vol - remaining
         if oil_used <= 0:
-            _LOGGER.warning("Cannot calibrate: oil used is zero or negative")
+            return False, "No oil consumed yet"
+
+        # Require at least 10% consumption
+        if oil_used < (fill_vol * 0.10):
+            return False, "Less than 10% of fill volume consumed"
+
+        return True, "OK"
+
+    def finalize_calibration(self):
+        """Finalize calibration and compute usage rate.
+
+        Returns usage_rate if successful, otherwise None.
+        """
+        if self.get_calibration_state() != "Ready to Finalize":
+            _LOGGER.warning("Calibration finalize requested but state is %s", self.get_calibration_state())
             return None
-        
+
+        is_valid, message = self._validate_calibration_inputs()
+        if not is_valid:
+            _LOGGER.warning("Cannot calibrate: %s", message)
+            return None
+
+        fill_vol = self._oil_calibration["fill_volume"]
+        remaining = self._oil_calibration["measured_remaining"]
+        runtime = self._accumulated_work_seconds
+
+        oil_used = fill_vol - remaining
         usage_rate = oil_used / runtime  # ml per second of work
-        
+
         self._oil_calibration["usage_rate"] = usage_rate
         self._oil_calibration["calibrated"] = True
         self._oil_calibration["calibration_runtime"] = runtime
-        
+        self._oil_calibration["calibration_state"] = "Calibrated"
+        self._oil_tracking_active = True
+
+        self._log_oil_event("CAL_FINAL", f"Calibration finalized: {usage_rate:.6f} ml/sec")
+        self._request_oil_state_save()
+
         _LOGGER.info(
             "Oil calibration complete for %s: %.6f ml/sec (%.2f ml/hour of spray)",
             self.device_id, usage_rate, usage_rate * 3600
         )
-        
+
         return usage_rate
     
     def get_estimated_oil_remaining(self):
@@ -359,7 +525,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
         
         fill_vol = self._oil_calibration["fill_volume"]
         usage_rate = self._oil_calibration["usage_rate"]
-        runtime = self._accumulated_work_seconds
+        runtime, _ = self._get_effective_runtime_seconds()
         
         oil_used = runtime * usage_rate
         remaining = fill_vol - oil_used
@@ -380,49 +546,153 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             return None
         
         return min(100, (remaining / capacity) * 100)
+
+    def _parse_time_to_seconds(self, time_str):
+        """Convert HH:MM to seconds since midnight."""
+        if not time_str:
+            return 0
+        parts = time_str.split(":")
+        if len(parts) != 2:
+            return 0
+        try:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            return (hours * 3600) + (minutes * 60)
+        except ValueError:
+            return 0
+
+    def get_schedule_daily_work_seconds(self):
+        """Estimate expected work seconds per day from the schedule matrix."""
+        day_seconds = [0.0] * 7
+
+        if not self._schedule_cache:
+            return day_seconds
+
+        for day, programs in self._schedule_cache.items():
+            if day < 0 or day > 6:
+                continue
+
+            total_day_seconds = 0.0
+            for program in programs:
+                if program.get("enabled", 0) != 1:
+                    continue
+
+                start_time = program.get("start_time", "00:00")
+                end_time = program.get("end_time", "23:59")
+                work_sec = int(program.get("work_sec", 0) or 0)
+                pause_sec = int(program.get("pause_sec", 0) or 0)
+
+                if work_sec <= 0:
+                    continue
+
+                start_sec = self._parse_time_to_seconds(start_time)
+                end_sec = self._parse_time_to_seconds(end_time)
+                window = end_sec - start_sec
+                if window <= 0:
+                    # Crosses midnight, treat as next-day
+                    window += 24 * 3600
+
+                cycle = work_sec + max(pause_sec, 0)
+                if cycle <= 0:
+                    continue
+
+                duty_cycle = work_sec / cycle
+                total_day_seconds += window * duty_cycle
+
+            day_seconds[day] = total_day_seconds
+
+        return day_seconds
+
+    def _get_effective_runtime_seconds(self):
+        """Return runtime seconds and source (tracked or schedule_estimate)."""
+        if self._accumulated_work_seconds > 0:
+            return self._accumulated_work_seconds, "tracked"
+
+        fill_date = self._oil_calibration.get("fill_date")
+        if not fill_date:
+            return self._accumulated_work_seconds, "tracked"
+
+        try:
+            from datetime import datetime, date
+            fill_dt = datetime.strptime(fill_date, "%Y-%m-%d").date()
+            days_since = (date.today() - fill_dt).days
+        except ValueError:
+            return self._accumulated_work_seconds, "tracked"
+
+        if days_since <= 0:
+            return self._accumulated_work_seconds, "tracked"
+
+        day_seconds = self.get_schedule_daily_work_seconds()
+        avg_daily_work = sum(day_seconds) / 7 if day_seconds else 0
+        if avg_daily_work <= 0:
+            return self._accumulated_work_seconds, "tracked"
+
+        return avg_daily_work * days_since, "schedule_estimate"
+
+    def get_estimated_days_remaining_schedule(self):
+        """Estimate remaining days based on schedule (future projection)."""
+        remaining = self.get_estimated_oil_remaining()
+        usage_rate = self._oil_calibration.get("usage_rate")
+
+        if remaining is None or not usage_rate:
+            return None
+
+        day_seconds = self.get_schedule_daily_work_seconds()
+        avg_daily_work = sum(day_seconds) / 7 if day_seconds else 0
+
+        if avg_daily_work <= 0:
+            return None
+
+        daily_usage_ml = avg_daily_work * usage_rate
+        if daily_usage_ml <= 0:
+            return None
+
+        return remaining / daily_usage_ml
     
     def reset_oil_fill(self):
-        """Mark oil as just filled (resets runtime tracking).
-        
-        Sets fill_volume = bottle_capacity and resets tracking.
-        Preserves calibrated usage_rate if already calibrated.
-        """
-        capacity = self._oil_calibration["bottle_capacity"]
-        self._oil_calibration["fill_volume"] = capacity
-        
-        # Reset runtime tracking
-        import time
-        self._oil_tracking_active = True
-        self._oil_tracking_start_time = time.time()
-        self._accumulated_work_seconds = 0.0
-        self._completed_cycles = 0
-        self._oil_events = []
-        
-        # Capture baseline
-        if self.data:
-            self._baseline_pump_count = self.data.get("pumpCount", 0)
-        
-        self._log_oil_event("FILL", f"Oil filled to {capacity}ml. Tracking reset.")
-        
-        _LOGGER.info("Oil fill reset for %s. Capacity: %d ml", self.device_id, capacity)
+        """Mark oil as just filled (resets runtime tracking)."""
+        self.start_calibration_measurement()
+        _LOGGER.info("Oil fill reset for %s.", self.device_id)
     
     def get_oil_status(self):
         """Get comprehensive oil status for display."""
         remaining = self.get_estimated_oil_remaining()
         level_pct = self.get_oil_level_percent()
+        schedule_days = self.get_estimated_days_remaining_schedule()
         cal = self._oil_calibration
+        calibrated = cal["usage_rate"] is not None
+        effective_runtime, runtime_source = self._get_effective_runtime_seconds()
         
         return {
             "bottle_capacity_ml": cal["bottle_capacity"],
             "fill_volume_ml": cal["fill_volume"],
-            "calibrated": cal["calibrated"],
+            "calibrated": calibrated,
+            "calibration_state": cal.get("calibration_state", "Idle"),
+            "fill_date": cal.get("fill_date"),
             "usage_rate_ml_per_sec": cal["usage_rate"],
             "usage_rate_ml_per_hour": cal["usage_rate"] * 3600 if cal["usage_rate"] else None,
             "estimated_remaining_ml": round(remaining, 1) if remaining is not None else None,
             "level_percent": round(level_pct, 1) if level_pct is not None else None,
+            "estimated_days_remaining_schedule": round(schedule_days, 1) if schedule_days is not None else None,
             "runtime_since_fill_sec": self._accumulated_work_seconds,
             "runtime_since_fill_hours": round(self._accumulated_work_seconds / 3600, 2),
+            "effective_runtime_sec": round(effective_runtime, 1),
+            "effective_runtime_hours": round(effective_runtime / 3600, 2),
+            "runtime_source": runtime_source,
             "completed_cycles": self._completed_cycles,
+        }
+
+    def export_oil_state(self):
+        """Export oil tracking/calibration state for persistence."""
+        return {
+            "oil_tracking_active": self._oil_tracking_active,
+            "oil_tracking_start_time": self._oil_tracking_start_time,
+            "baseline_pump_count": self._baseline_pump_count,
+            "accumulated_work_seconds": self._accumulated_work_seconds,
+            "completed_cycles": self._completed_cycles,
+            "prev_work_duration": self._prev_work_duration,
+            "prev_pause_duration": self._prev_pause_duration,
+            "calibration": self._oil_calibration.copy(),
         }
 
     async def fetch_work_time_settings(self, week_day=0):

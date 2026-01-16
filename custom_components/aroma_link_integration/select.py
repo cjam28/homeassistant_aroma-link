@@ -20,6 +20,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkProgramDaySelector(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkProgramSelector(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkProgramLevel(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilCalibrationState(coordinator, entry, device_id, device_name))
 
     async_add_entities(entities)
 
@@ -201,4 +202,59 @@ class AromaLinkProgramDaySelector(CoordinatorEntity, SelectEntity):
             return
         self.coordinator._current_day = self._day_names.index(option)
         await self.coordinator.async_refresh_schedule(self.coordinator._current_day)
+        self.coordinator.async_update_listeners()
+
+
+class AromaLinkOilCalibrationState(CoordinatorEntity, SelectEntity):
+    """Calibration state selector."""
+
+    _options = ["Idle", "Running", "Ready to Finalize", "Calibrated"]
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._device_id = device_id
+        self._device_name = device_name
+        self._name = f"{device_name} Oil Calibration State"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_calibration_state"
+        self._attr_icon = "mdi:flask-outline"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        """Return the name."""
+        return self._name
+
+    @property
+    def unique_id(self):
+        """Return unique ID."""
+        return self._unique_id
+
+    @property
+    def options(self):
+        """Return available states."""
+        return self._options
+
+    @property
+    def current_option(self):
+        """Return current calibration state."""
+        state = self.coordinator.get_calibration_state()
+        return state if state in self._options else "Idle"
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self.coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_select_option(self, option: str):
+        """Set calibration state."""
+        if option not in self._options:
+            return
+        self.coordinator.set_calibration_state(option)
         self.coordinator.async_update_listeners()

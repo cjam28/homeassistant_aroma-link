@@ -1,5 +1,5 @@
 /**
- * Aroma-Link Schedule Card v2.2.0
+ * Aroma-Link Schedule Card v2.3.0
  * 
  * A complete dashboard card for Aroma-Link diffusers including:
  * - Compact manual controls (Power, Fan, Work/Pause, Run options in one row)
@@ -57,6 +57,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  _titleCase(name) {
+    return name
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, char => char.toUpperCase());
   }
 
   async _startTimedRun(deviceName, deviceId, hours) {
@@ -728,8 +734,11 @@ class AromaLinkScheduleCard extends HTMLElement {
       bottleCapacity: `number.${deviceName}_oil_bottle_capacity`,
       fillVolume: `number.${deviceName}_oil_fill_volume`,
       measuredRemaining: `number.${deviceName}_oil_remaining_measured`,
-      fillButton: `button.${deviceName}_oil_fill_reset`,
-      calibrateButton: `button.${deviceName}_oil_calibrate`,
+      fillDate: `text.${deviceName}_oil_fill_date`,
+      calibrationState: `select.${deviceName}_oil_calibration_state`,
+      calibrationToggle: `button.${deviceName}_oil_calibration_toggle`,
+      calibrationFinalize: `button.${deviceName}_oil_calibration_finalize`,
+      refillKeepCalibration: `button.${deviceName}_oil_refill_keep_calibration`,
     };
     
     // Check which entities exist
@@ -756,15 +765,20 @@ class AromaLinkScheduleCard extends HTMLElement {
     const capacityState = this._hass.states[entities.bottleCapacity];
     const fillVolumeState = this._hass.states[entities.fillVolume];
     const measuredState = this._hass.states[entities.measuredRemaining];
+    const fillDateState = this._hass.states[entities.fillDate];
+    const calibrationStateEntity = this._hass.states[entities.calibrationState];
 
     const oilLevel = oilLevelState?.state !== 'unknown' && oilLevelState?.state !== 'unavailable' 
       ? parseFloat(oilLevelState?.state) : null;
     const oilRemaining = oilRemainingState?.state !== 'unknown' && oilRemainingState?.state !== 'unavailable'
       ? parseFloat(oilRemainingState?.state) : null;
+    const fallbackCalState = oilRemainingState?.attributes?.calibration_state || (oilRemainingState?.attributes?.calibrated ? 'Calibrated' : 'Idle');
+    const calibrationState = calibrationStateEntity?.state || fallbackCalState;
     const isCalibrated = oilRemainingState?.attributes?.calibrated || false;
     const bottleCapacity = parseFloat(capacityState?.state) || 100;
     const fillVolume = parseFloat(fillVolumeState?.state) || 100;
     const measuredRemaining = parseFloat(measuredState?.state) || 0;
+    const fillDate = fillDateState?.state || '';
     
     // Runtime info
     const formattedRuntime = runtimeState?.attributes?.formatted_runtime || '0h 0m 0s';
@@ -772,8 +786,7 @@ class AromaLinkScheduleCard extends HTMLElement {
     const trackingActive = runtimeState?.attributes?.tracking_active || false;
     
     // Estimated time remaining
-    const hoursRemaining = oilRemainingState?.attributes?.estimated_hours_remaining;
-    const daysRemaining = oilRemainingState?.attributes?.estimated_days_remaining;
+    const daysRemaining = oilRemainingState?.attributes?.estimated_days_remaining_schedule;
     
     // Usage rate
     const usagePerHour = oilRemainingState?.attributes?.usage_rate_ml_per_hour;
@@ -787,101 +800,159 @@ class AromaLinkScheduleCard extends HTMLElement {
     else if (fillPercent < 50) levelColor = '#ff9800'; // orange
     else if (fillPercent < 75) levelColor = '#8bc34a'; // lime
 
+    const showSummaryValue = (val, suffix = '') => {
+      if (val === null || val === undefined || isNaN(val)) return 'n/a';
+      return `${val}${suffix}`;
+    };
+
+    const daysRemainingDisplay = (daysRemaining !== null && daysRemaining !== undefined)
+      ? `${daysRemaining} days`
+      : 'n/a';
+    const usageDisplay = usagePerHour ? `${usagePerHour.toFixed(2)} ml/hr` : 'n/a';
+    const remainingDisplay = oilRemaining !== null ? `${Math.round(oilRemaining)} ml` : 'n/a';
+
+    const toggleLabel = (() => {
+      if (calibrationState === 'Running') return 'End Calibration';
+      if (calibrationState === 'Ready to Finalize') return 'Resume Calibration';
+      return 'Start Calibration Measurement';
+    })();
+
+    const consumed = fillVolume - measuredRemaining;
+    const minConsumed = fillVolume * 0.10;
+    const runtimeHours = parseFloat(runtimeState?.attributes?.runtime_hours) || 0;
+    const canFinalize = calibrationState === 'Ready to Finalize'
+      && fillVolume > 0
+      && measuredRemaining >= 0
+      && consumed >= minConsumed
+      && consumed > 0
+      && runtimeHours > 0;
+
+    const measuredDisabled = calibrationState !== 'Ready to Finalize';
+    const calibrationBadge = calibrationState === 'Running'
+      ? '<span class="calibration-badge running">Calibration Running</span>'
+      : calibrationState === 'Ready to Finalize'
+        ? '<span class="calibration-badge ready">Ready to Finalize</span>'
+        : calibrationState === 'Calibrated'
+          ? '<span class="calibration-badge calibrated">Calibrated</span>'
+          : '<span class="calibration-badge idle">Not Calibrated</span>';
+
     return `
       <div class="oil-section" data-device="${sensor.deviceName}">
         <div class="oil-header">
           <span class="section-title">🛢️ Oil Level</span>
-          ${isCalibrated ? '<span class="calibrated-badge">✓ Calibrated</span>' : '<span class="uncalibrated-badge">⚠ Not Calibrated</span>'}
+          ${calibrationBadge}
         </div>
         
         <div class="oil-content">
-          <!-- Bottle Visualization -->
-          <div class="bottle-container">
-            <div class="bottle">
-              <div class="bottle-fill" style="height: ${fillPercent}%; background: ${levelColor};"></div>
-              <div class="bottle-label">
-                ${oilLevel !== null ? `${Math.round(oilLevel)}%` : '?'}
+          <!-- LEFT: Bottle + Summary -->
+          <div class="oil-left">
+            <div class="bottle-container">
+              <div class="bottle">
+                <div class="bottle-fill" style="height: ${fillPercent}%; background: ${levelColor};"></div>
+                <div class="bottle-label">
+                  ${oilLevel !== null ? `${Math.round(oilLevel)}%` : '?'}
+                </div>
               </div>
             </div>
-            <div class="bottle-info">
-              ${oilRemaining !== null ? `<span class="remaining">${Math.round(oilRemaining)} ml</span>` : ''}
-              ${daysRemaining ? `<span class="days-left">~${daysRemaining} days</span>` : ''}
+            
+            <div class="oil-summary">
+              <div class="summary-row">
+                <span class="summary-label">Remaining Oil</span>
+                <span class="summary-value">${isCalibrated ? remainingDisplay : 'n/a'}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-label">Estimated Days Remaining</span>
+                <span class="summary-value">${isCalibrated ? daysRemainingDisplay : 'n/a'}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-label">Consumption Rate</span>
+                <span class="summary-value">${isCalibrated ? usageDisplay : 'n/a'}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-label">Fill Volume</span>
+                <span class="summary-value">${showSummaryValue(fillVolume, ' ml')}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-label">Fill Date</span>
+                <span class="summary-value">${fillDate || 'n/a'}</span>
+              </div>
             </div>
           </div>
           
-          <!-- Stats -->
-          <div class="oil-stats">
-            <div class="stat-row">
-              <span class="stat-label">Runtime</span>
-              <span class="stat-value">${formattedRuntime}</span>
-            </div>
-            <div class="stat-row">
-              <span class="stat-label">Cycles</span>
-              <span class="stat-value">${completedCycles}</span>
-            </div>
-            ${usagePerHour ? `
-            <div class="stat-row">
-              <span class="stat-label">Usage</span>
-              <span class="stat-value">${usagePerHour.toFixed(2)} ml/hr</span>
-            </div>
-            ` : ''}
-            <div class="stat-row">
-              <span class="stat-label">Tracking</span>
-              <span class="stat-value ${trackingActive ? 'active' : 'inactive'}">${trackingActive ? 'Active' : 'Inactive'}</span>
-            </div>
+          <!-- RIGHT: Calibration + Tracking -->
+          <div class="oil-right">
+            <details class="calibration-panel">
+              <summary>Calibration & Tracking</summary>
+              <div class="calibration-content">
+                <div class="calibration-row">
+                  <span class="stat-label">Runtime</span>
+                  <span class="stat-value">${formattedRuntime}</span>
+                </div>
+                <div class="calibration-row">
+                  <span class="stat-label">Cycles</span>
+                  <span class="stat-value">${completedCycles}</span>
+                </div>
+                <div class="calibration-row">
+                  <span class="stat-label">Tracking</span>
+                  <span class="stat-value ${trackingActive ? 'active' : 'inactive'}">${trackingActive ? 'Active' : 'Inactive'}</span>
+                </div>
+
+                <div class="calibration-row">
+                  <label>Bottle Capacity</label>
+                  <div class="input-group">
+                    <input type="number" class="oil-input" data-oil="bottleCapacity" data-device="${sensor.deviceName}" 
+                           value="${bottleCapacity}" min="10" max="1000" step="5">
+                    <span>ml</span>
+                  </div>
+                </div>
+                <div class="calibration-row">
+                  <label>Fill Volume</label>
+                  <div class="input-group">
+                    <input type="number" class="oil-input" data-oil="fillVolume" data-device="${sensor.deviceName}" 
+                           value="${fillVolume}" min="0" max="1000" step="1">
+                    <span>ml</span>
+                  </div>
+                </div>
+                <div class="calibration-row">
+                  <label>Fill Date</label>
+                  <div class="input-group">
+                    <input type="date" class="oil-input date" data-oil="fillDate" data-device="${sensor.deviceName}" 
+                           value="${fillDate}">
+                  </div>
+                </div>
+                <div class="calibration-row">
+                  <label>Measured Remaining</label>
+                  <div class="input-group">
+                    <input type="number" class="oil-input" data-oil="measuredRemaining" data-device="${sensor.deviceName}" 
+                           value="${measuredRemaining}" min="0" max="1000" step="1" ${measuredDisabled ? 'disabled' : ''}>
+                    <span>ml</span>
+                  </div>
+                </div>
+                
+                <div class="calibration-actions">
+                  <button class="oil-btn fill-btn" data-action="oil-toggle" data-device="${sensor.deviceName}">
+                    ${toggleLabel}
+                  </button>
+                  <button class="oil-btn calibrate-btn ${canFinalize ? '' : 'disabled'}" data-action="oil-finalize" data-device="${sensor.deviceName}">
+                    Finalize Calibration
+                  </button>
+                </div>
+
+                <div class="calibration-actions secondary">
+                  <button class="oil-btn small-btn" data-action="oil-refill" data-device="${sensor.deviceName}">
+                    Refill (Keep Calibration)
+                  </button>
+                </div>
+                
+                ${calibrationState === 'Ready to Finalize' && !canFinalize ? `
+                  <div class="calibration-warning">
+                    Measure remaining oil and ensure at least 10% of fill volume has been consumed.
+                  </div>
+                ` : ''}
+              </div>
+            </details>
           </div>
         </div>
-        
-        <!-- Calibration Controls -->
-        <details class="calibration-panel">
-          <summary>⚙️ Calibration Settings</summary>
-          <div class="calibration-content">
-            <div class="calibration-row">
-              <label>Bottle Capacity</label>
-              <div class="input-group">
-                <input type="number" class="oil-input" data-oil="bottleCapacity" data-device="${sensor.deviceName}" 
-                       value="${bottleCapacity}" min="10" max="1000" step="5">
-                <span>ml</span>
-              </div>
-            </div>
-            <div class="calibration-row">
-              <label>Fill Volume</label>
-              <div class="input-group">
-                <input type="number" class="oil-input" data-oil="fillVolume" data-device="${sensor.deviceName}" 
-                       value="${fillVolume}" min="0" max="1000" step="1">
-                <span>ml</span>
-              </div>
-            </div>
-            <div class="calibration-row">
-              <label>Measured Remaining</label>
-              <div class="input-group">
-                <input type="number" class="oil-input" data-oil="measuredRemaining" data-device="${sensor.deviceName}" 
-                       value="${measuredRemaining}" min="0" max="1000" step="1">
-                <span>ml</span>
-              </div>
-            </div>
-            
-            <div class="calibration-actions">
-              <button class="oil-btn fill-btn" data-action="oil-fill" data-device="${sensor.deviceName}">
-                🛢️ Just Filled Oil
-              </button>
-              <button class="oil-btn calibrate-btn" data-action="oil-calibrate" data-device="${sensor.deviceName}">
-                📊 Calibrate
-              </button>
-            </div>
-            
-            <div class="calibration-help">
-              <strong>How to calibrate:</strong>
-              <ol>
-                <li>Set bottle capacity</li>
-                <li>Fill oil, set fill volume, click "Just Filled Oil"</li>
-                <li>Run for 3-7 days</li>
-                <li>Measure remaining oil, enter above</li>
-                <li>Click "Calibrate"</li>
-              </ol>
-            </div>
-          </div>
-        </details>
       </div>
     `;
   }
@@ -964,36 +1035,41 @@ class AromaLinkScheduleCard extends HTMLElement {
       return `
         <div class="diffuser-card" data-device="${sensor.deviceName}">
           <div class="card-header">
-            <span class="title">🌸 ${sensor.deviceName.replace(/_/g, ' ')} Diffuser</span>
+            <span class="title">🌸 ${this._titleCase(sensor.deviceName)} Diffuser</span>
           </div>
           
-          <!-- COMPACT MANUAL CONTROLS ROW -->
+          <!-- MANUAL CONTROLS ROW -->
           <div class="compact-controls">
-            <div class="control-group">
-              <button class="icon-btn ${isPowerOn ? 'active' : ''}" data-action="toggle-power" data-device="${sensor.deviceName}" title="Power">
-                <span class="icon">⚡</span>
-                <span class="label">${isPowerOn ? 'ON' : 'OFF'}</span>
+            <div class="control-group power-group">
+              <button class="icon-btn power-btn ${isPowerOn ? 'active' : ''}" data-action="toggle-power" data-device="${sensor.deviceName}" title="Power">
+                <span class="icon">⏻</span>
+                <span class="label">Power</span>
+                <span class="state">${isPowerOn ? 'On' : 'Off'}</span>
               </button>
-              <button class="icon-btn ${isFanOn ? 'active' : ''}" data-action="toggle-fan" data-device="${sensor.deviceName}" title="Fan">
-                <span class="icon">🌀</span>
-                <span class="label">${isFanOn ? 'ON' : 'OFF'}</span>
+              <button class="icon-btn fan-btn ${isFanOn ? 'active' : ''}" data-action="toggle-fan" data-device="${sensor.deviceName}" title="Fan">
+                <span class="icon">🪭</span>
+                <span class="label">Fan</span>
+                <span class="state">${isFanOn ? 'On' : 'Off'}</span>
               </button>
             </div>
             
             <div class="control-group settings">
-              <label>W<input type="number" class="compact-input" data-field="workSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999">s</label>
-              <label>P<input type="number" class="compact-input" data-field="pauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999">s</label>
+              <label>Work <input type="number" class="compact-input" data-field="workSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999"><span class="unit">s</span></label>
+              <label>Pause <input type="number" class="compact-input" data-field="pauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999"><span class="unit">s</span></label>
             </div>
             
             <div class="control-group run-options">
               ${timerState ? `
                 <span class="countdown">⏱️ ${this._formatCountdown(timerState.remainingSeconds)}</span>
-                <button class="cancel-btn" data-action="cancel-timer" data-device="${sensor.deviceName}">✕</button>
+                <button class="cancel-btn" data-action="cancel-timer" data-device="${sensor.deviceName}">Cancel</button>
               ` : `
-                <button class="run-btn continuous" data-action="run-continuous" data-device="${sensor.deviceName}">▶ Run</button>
-                <button class="run-btn timed" data-action="run-timed" data-device="${sensor.deviceName}">⏱</button>
-                <input type="number" class="hours-input" data-field="timedHours" data-device="${sensor.deviceName}" value="${timedHours}" min="0.5" max="24" step="0.5" title="Hours">
-                <span class="hours-label">hr</span>
+                <div class="run-header">Apply Settings and</div>
+                <div class="run-buttons">
+                  <button class="run-btn continuous" data-action="run-continuous" data-device="${sensor.deviceName}">Run Continuously</button>
+                  <button class="run-btn timed" data-action="run-timed" data-device="${sensor.deviceName}">Run Timed</button>
+                  <input type="number" class="hours-input" data-field="timedHours" data-device="${sensor.deviceName}" value="${timedHours}" min="0.5" max="24" step="0.5" title="Hours">
+                  <span class="hours-label">hr</span>
+                </div>
               `}
             </div>
           </div>
@@ -1010,7 +1086,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                   </select>
                 </div>
               ` : ''}
-              <button class="chip-btn pull-btn" data-action="pull" data-device="${sensor.deviceName}">↓ Pull</button>
+              <button class="chip-btn pull-btn" data-action="pull" data-device="${sensor.deviceName}">Pull Aroma-Link Schedule</button>
             </div>
             
             <!-- Legend -->
@@ -1110,30 +1186,31 @@ class AromaLinkScheduleCard extends HTMLElement {
                 </div>
                 
                 <div class="num-inputs">
-                  <label>W<input type="number" class="num-input" data-field="editorWorkSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999"></label>
-                  <label>P<input type="number" class="num-input" data-field="editorPauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999"></label>
+                  <label>Work <input type="number" class="num-input" data-field="editorWorkSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999"><span class="unit">s</span></label>
+                  <label>Pause <input type="number" class="num-input" data-field="editorPauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999"><span class="unit">s</span></label>
                 </div>
                 
+                <div class="inline-actions">
+                  <button class="clear-btn ${selectionCount === 0 ? 'disabled' : ''}" 
+                          data-action="clear-schedule" data-device="${sensor.deviceName}">
+                    Clear Selected
+                  </button>
+                  <button class="stage-btn ${selectionCount === 0 ? 'disabled' : ''}" 
+                          data-action="stage" data-device="${sensor.deviceName}">
+                    Stage Edits
+                  </button>
+                  <button class="push-btn ${!hasStagedChanges || this._isSaving ? 'disabled' : ''}" 
+                          data-action="push" data-device="${sensor.deviceName}">
+                    ${this._isSaving ? 'Saving...' : 'Save & Sync to Aroma-Link'}
+                  </button>
+                </div>
+                
+                <label class="level-label">Level</label>
                 <select class="level-select" data-field="level" data-device="${sensor.deviceName}">
                   <option value="A" ${editorValues.level === 'A' ? 'selected' : ''}>A</option>
                   <option value="B" ${editorValues.level === 'B' ? 'selected' : ''}>B</option>
                   <option value="C" ${editorValues.level === 'C' ? 'selected' : ''}>C</option>
                 </select>
-              </div>
-              
-              <div class="editor-buttons">
-                <button class="stage-btn ${selectionCount === 0 ? 'disabled' : ''}" 
-                        data-action="stage" data-device="${sensor.deviceName}">
-                  📝 Stage Edits
-                </button>
-                <button class="clear-btn ${selectionCount === 0 ? 'disabled' : ''}" 
-                        data-action="clear-schedule" data-device="${sensor.deviceName}">
-                  🗑 Clear Selected
-                </button>
-                <button class="push-btn ${!hasStagedChanges || this._isSaving ? 'disabled' : ''}" 
-                        data-action="push" data-device="${sensor.deviceName}">
-                  ${this._isSaving ? '⏳ Pushing...' : '↑ Push to Aroma-Link'}
-                </button>
               </div>
             </div>
               `;
@@ -1381,48 +1458,74 @@ class AromaLinkScheduleCard extends HTMLElement {
       input.addEventListener('change', async (e) => {
         const deviceName = input.dataset.device;
         const field = input.dataset.oil;
-        const value = parseFloat(e.target.value);
+        const rawValue = e.target.value;
         
         const entityMap = {
-          bottleCapacity: `number.${deviceName}_oil_bottle_capacity`,
-          fillVolume: `number.${deviceName}_oil_fill_volume`,
-          measuredRemaining: `number.${deviceName}_oil_remaining_measured`
+          bottleCapacity: { entity: `number.${deviceName}_oil_bottle_capacity`, domain: 'number' },
+          fillVolume: { entity: `number.${deviceName}_oil_fill_volume`, domain: 'number' },
+          measuredRemaining: { entity: `number.${deviceName}_oil_remaining_measured`, domain: 'number' },
+          fillDate: { entity: `text.${deviceName}_oil_fill_date`, domain: 'text' }
         };
         
-        const entityId = entityMap[field];
-        if (entityId && this._hass.states[entityId]) {
-          await this._hass.callService('number', 'set_value', {
-            entity_id: entityId,
-            value: value
+        const config = entityMap[field];
+        if (!config || !this._hass.states[config.entity]) return;
+
+        if (config.domain === 'number') {
+          const value = parseFloat(rawValue);
+          if (!isNaN(value)) {
+            await this._hass.callService('number', 'set_value', {
+              entity_id: config.entity,
+              value: value
+            });
+          }
+        } else if (config.domain === 'text') {
+          await this._hass.callService('text', 'set_value', {
+            entity_id: config.entity,
+            value: rawValue
           });
         }
       });
     });
 
-    this.shadowRoot.querySelectorAll('[data-action="oil-fill"]').forEach(btn => {
+    this.shadowRoot.querySelectorAll('[data-action="oil-toggle"]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const deviceName = btn.dataset.device;
-        const fillButton = `button.${deviceName}_oil_fill_reset`;
+        const toggleButton = `button.${deviceName}_oil_calibration_toggle`;
         
-        if (this._hass.states[fillButton]) {
+        if (this._hass.states[toggleButton]) {
           await this._hass.callService('button', 'press', {
-            entity_id: fillButton
+            entity_id: toggleButton
           });
-          this._showStatus('Oil fill recorded - tracking started!', false, deviceName);
+          this._showStatus('Calibration state updated', false, deviceName);
         }
       });
     });
 
-    this.shadowRoot.querySelectorAll('[data-action="oil-calibrate"]').forEach(btn => {
+    this.shadowRoot.querySelectorAll('[data-action="oil-finalize"]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const deviceName = btn.dataset.device;
-        const calibrateButton = `button.${deviceName}_oil_calibrate`;
+        const finalizeButton = `button.${deviceName}_oil_calibration_finalize`;
         
-        if (this._hass.states[calibrateButton]) {
+        if (btn.classList.contains('disabled')) return;
+        if (this._hass.states[finalizeButton]) {
           await this._hass.callService('button', 'press', {
-            entity_id: calibrateButton
+            entity_id: finalizeButton
           });
-          this._showStatus('Calibration complete!', false, deviceName);
+          this._showStatus('Calibration finalized', false, deviceName);
+        }
+      });
+    });
+
+    this.shadowRoot.querySelectorAll('[data-action="oil-refill"]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const deviceName = btn.dataset.device;
+        const refillButton = `button.${deviceName}_oil_refill_keep_calibration`;
+        
+        if (this._hass.states[refillButton]) {
+          await this._hass.callService('button', 'press', {
+            entity_id: refillButton
+          });
+          this._showStatus('Refill recorded (calibration kept)', false, deviceName);
         }
       });
     });
@@ -1474,8 +1577,9 @@ class AromaLinkScheduleCard extends HTMLElement {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 8px;
-        padding: 8px 10px;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
         background: var(--color-surface);
         border-radius: var(--radius-sm);
         margin-bottom: var(--spacing);
@@ -1484,19 +1588,24 @@ class AromaLinkScheduleCard extends HTMLElement {
       .control-group {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
+      }
+
+      .control-group.power-group {
+        gap: 10px;
       }
       
       .icon-btn {
         display: flex;
         flex-direction: column;
         align-items: center;
-        padding: 6px 10px;
+        padding: 10px 14px;
         border: none;
         border-radius: 8px;
         background: rgba(0,0,0,0.05);
         cursor: pointer;
         transition: all 150ms;
+        min-width: 76px;
       }
       
       .icon-btn:hover {
@@ -1509,51 +1618,75 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .icon-btn .icon {
-        font-size: 1.2em;
+        font-size: 1.4em;
       }
       
       .icon-btn .label {
-        font-size: 0.65em;
+        font-size: 0.7em;
         font-weight: 600;
         margin-top: 2px;
+      }
+
+      .icon-btn .state {
+        font-size: 0.7em;
+        font-weight: 700;
+        margin-top: 2px;
+        letter-spacing: 0.3px;
       }
       
       .control-group.settings {
         display: flex;
-        gap: 6px;
+        gap: 10px;
       }
       
       .control-group.settings label {
         display: flex;
         align-items: center;
-        gap: 2px;
-        font-size: 0.75em;
+        gap: 4px;
+        font-size: 0.8em;
         font-weight: 500;
         color: var(--color-text-secondary);
       }
       
       .compact-input {
-        width: 50px;
-        padding: 4px 6px;
+        width: 64px;
+        padding: 6px 8px;
         border: 1px solid rgba(0,0,0,0.1);
         border-radius: 4px;
-        font-size: 0.85em;
+        font-size: 0.95em;
         text-align: center;
+      }
+
+      .unit {
+        font-size: 0.75em;
+        color: var(--color-text-secondary);
       }
       
       .control-group.run-options {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
         margin-left: auto;
+      }
+
+      .run-header {
+        font-size: 0.75em;
+        color: var(--color-text-secondary);
+      }
+
+      .run-buttons {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 8px;
       }
       
       .run-btn {
-        padding: 6px 12px;
+        padding: 8px 14px;
         border: none;
         border-radius: 6px;
         font-weight: 600;
-        font-size: 0.75em;
+        font-size: 0.8em;
         cursor: pointer;
         transition: all 150ms;
       }
@@ -1574,11 +1707,11 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .hours-input {
-        width: 42px;
-        padding: 4px;
+        width: 52px;
+        padding: 6px;
         border: 1px solid rgba(0,0,0,0.1);
         border-radius: 4px;
-        font-size: 0.8em;
+        font-size: 0.85em;
         text-align: center;
       }
       
@@ -1588,7 +1721,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .countdown {
-        font-size: 0.85em;
+        font-size: 0.9em;
         font-weight: 600;
         color: var(--color-primary);
         padding: 4px 8px;
@@ -1810,14 +1943,16 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .schedule-cell .cell-time {
         font-weight: 600;
-        font-size: clamp(0.55rem, 1.5vw, 0.7rem);
+        font-size: clamp(0.65rem, 1.7vw, 0.8rem);
         line-height: 1.1;
         white-space: nowrap;
       }
       
       .schedule-cell .cell-meta {
-        font-size: clamp(0.5rem, 1.3vw, 0.6rem);
-        opacity: 0.75;
+        font-size: clamp(0.6rem, 1.5vw, 0.7rem);
+        font-weight: 600;
+        opacity: 0.95;
+        color: var(--color-text);
         white-space: nowrap;
       }
       
@@ -1931,7 +2066,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       .num-inputs label {
         display: flex;
         align-items: center;
-        gap: 2px;
+        gap: 4px;
         font-size: 0.75em;
         color: var(--color-text-secondary);
       }
@@ -1952,16 +2087,23 @@ class AromaLinkScheduleCard extends HTMLElement {
         font-size: 0.8em;
         background: white;
       }
+
+      .level-label {
+        font-size: 0.75em;
+        color: var(--color-text-secondary);
+        margin-left: 4px;
+      }
       
-      /* EDITOR BUTTONS */
-      .editor-buttons {
+      /* INLINE ACTIONS */
+      .inline-actions {
         display: flex;
-        flex-wrap: wrap;
+        align-items: center;
         gap: 6px;
+        flex-wrap: wrap;
       }
       
       .stage-btn, .clear-btn, .push-btn {
-        padding: 6px 12px;
+        padding: 6px 10px;
         border: none;
         border-radius: 16px;
         font-size: 0.75em;
@@ -2019,26 +2161,50 @@ class AromaLinkScheduleCard extends HTMLElement {
         margin-bottom: 12px;
       }
       
-      .calibrated-badge {
+      .calibration-badge {
         font-size: 0.7em;
         padding: 2px 8px;
         border-radius: 10px;
+        font-weight: 600;
+      }
+
+      .calibration-badge.running {
+        background: rgba(33, 150, 243, 0.15);
+        color: #1565c0;
+      }
+
+      .calibration-badge.ready {
+        background: rgba(255, 152, 0, 0.15);
+        color: #e65100;
+      }
+
+      .calibration-badge.calibrated {
         background: rgba(76, 175, 80, 0.15);
         color: #2e7d32;
       }
-      
-      .uncalibrated-badge {
-        font-size: 0.7em;
-        padding: 2px 8px;
-        border-radius: 10px;
-        background: rgba(255, 152, 0, 0.15);
-        color: #e65100;
+
+      .calibration-badge.idle {
+        background: rgba(158, 158, 158, 0.15);
+        color: #616161;
       }
       
       .oil-content {
         display: flex;
         gap: 16px;
         align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      .oil-left {
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+        flex: 1;
+      }
+
+      .oil-right {
+        min-width: 260px;
+        max-width: 340px;
       }
       
       .bottle-container {
@@ -2109,13 +2275,29 @@ class AromaLinkScheduleCard extends HTMLElement {
         font-size: 0.9em;
       }
       
-      .oil-stats {
-        flex: 1;
+      .oil-summary {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 6px;
+        min-width: 200px;
       }
-      
+
+      .summary-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 0.8em;
+      }
+
+      .summary-label {
+        color: #666;
+      }
+
+      .summary-value {
+        font-weight: 600;
+        color: #333;
+      }
+
       .stat-row {
         display: flex;
         justify-content: space-between;
@@ -2141,10 +2323,10 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       /* Calibration Panel */
       .calibration-panel {
-        margin-top: 12px;
         border: 1px solid rgba(0,0,0,0.1);
         border-radius: 8px;
         overflow: hidden;
+        width: 100%;
       }
       
       .calibration-panel summary {
@@ -2189,6 +2371,11 @@ class AromaLinkScheduleCard extends HTMLElement {
         font-size: 0.9em;
         text-align: right;
       }
+
+      .oil-input.date {
+        width: 120px;
+        text-align: left;
+      }
       
       .input-group span {
         color: #666;
@@ -2200,6 +2387,10 @@ class AromaLinkScheduleCard extends HTMLElement {
         gap: 8px;
         margin-top: 12px;
       }
+
+      .calibration-actions.secondary {
+        margin-top: 8px;
+      }
       
       .oil-btn {
         flex: 1;
@@ -2210,6 +2401,22 @@ class AromaLinkScheduleCard extends HTMLElement {
         font-weight: 500;
         cursor: pointer;
         transition: all 150ms;
+      }
+
+      .oil-btn.small-btn {
+        padding: 6px 10px;
+        font-size: 0.75em;
+        background: rgba(0,0,0,0.05);
+        color: #555;
+      }
+
+      .oil-btn.small-btn:hover {
+        background: rgba(0,0,0,0.1);
+      }
+
+      .oil-btn.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       
       .fill-btn {
@@ -2230,28 +2437,13 @@ class AromaLinkScheduleCard extends HTMLElement {
         background: rgba(156, 39, 176, 0.25);
       }
       
-      .calibration-help {
-        margin-top: 12px;
+      .calibration-warning {
+        margin-top: 10px;
         padding: 8px;
-        background: rgba(0,0,0,0.03);
+        background: rgba(255, 152, 0, 0.12);
         border-radius: 6px;
-        font-size: 0.7em;
-        color: #666;
-      }
-      
-      .calibration-help strong {
-        display: block;
-        margin-bottom: 4px;
-        color: #333;
-      }
-      
-      .calibration-help ol {
-        margin: 0;
-        padding-left: 16px;
-      }
-      
-      .calibration-help li {
-        margin: 2px 0;
+        font-size: 0.72em;
+        color: #e65100;
       }
     `;
   }

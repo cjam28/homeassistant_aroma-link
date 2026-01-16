@@ -22,8 +22,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkSaveProgramButton(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkSyncSchedulesButton(coordinator, entry, device_id, device_name))
         # Oil tracking buttons
-        entities.append(AromaLinkOilFillButton(coordinator, entry, device_id, device_name))
-        entities.append(AromaLinkOilCalibrateButton(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilCalibrationToggleButton(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilCalibrationFinalizeButton(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilRefillKeepCalibrationButton(coordinator, entry, device_id, device_name))
     
     async_add_entities(entities)
 
@@ -271,17 +272,17 @@ class AromaLinkSyncSchedulesButton(CoordinatorEntity, ButtonEntity):
 # OIL TRACKING BUTTONS
 # ============================================================
 
-class AromaLinkOilFillButton(CoordinatorEntity, ButtonEntity):
-    """Button to mark oil as just filled."""
+class AromaLinkOilCalibrationToggleButton(CoordinatorEntity, ButtonEntity):
+    """Button to start/end/resume calibration measurement."""
 
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
         self._entry = entry
         self._device_id = device_id
-        self._name = f"{device_name} Oil Fill (Reset)"
-        self._unique_id = f"{entry.data['username']}_{device_id}_oil_fill"
-        self._attr_icon = "mdi:water-plus"
+        self._name = f"{device_name} Calibration Measurement"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_calibration_toggle"
+        self._attr_icon = "mdi:flask-outline"
         self._attr_entity_category = "config"
 
     @property
@@ -302,23 +303,31 @@ class AromaLinkOilFillButton(CoordinatorEntity, ButtonEntity):
         )
 
     async def async_press(self):
-        """Mark oil as just filled - resets runtime tracking."""
-        _LOGGER.info("Oil fill button pressed for device %s", self.coordinator.device_id)
-        self.coordinator.reset_oil_fill()
+        """Start/End/Resume calibration measurement based on state."""
+        state = self.coordinator.get_calibration_state()
+        _LOGGER.info("Calibration toggle pressed for %s (state=%s)", self.coordinator.device_id, state)
+
+        if state in {"Idle", "Calibrated"}:
+            self.coordinator.start_calibration_measurement()
+        elif state == "Running":
+            self.coordinator.end_calibration_measurement()
+        elif state == "Ready to Finalize":
+            self.coordinator.resume_calibration_measurement()
+
         self.coordinator.async_update_listeners()
 
 
-class AromaLinkOilCalibrateButton(CoordinatorEntity, ButtonEntity):
-    """Button to calculate oil usage rate from measured remaining."""
+class AromaLinkOilCalibrationFinalizeButton(CoordinatorEntity, ButtonEntity):
+    """Button to finalize calibration and compute usage rate."""
 
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize."""
         super().__init__(coordinator)
         self._entry = entry
         self._device_id = device_id
-        self._name = f"{device_name} Oil Calibrate"
-        self._unique_id = f"{entry.data['username']}_{device_id}_oil_calibrate"
-        self._attr_icon = "mdi:calculator"
+        self._name = f"{device_name} Calibration Finalize"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_calibration_finalize"
+        self._attr_icon = "mdi:check-circle-outline"
         self._attr_entity_category = "config"
 
     @property
@@ -339,18 +348,57 @@ class AromaLinkOilCalibrateButton(CoordinatorEntity, ButtonEntity):
         )
 
     async def async_press(self):
-        """Calculate usage rate from fill volume, measured remaining, and runtime."""
-        _LOGGER.info("Oil calibrate button pressed for device %s", self.coordinator.device_id)
-        
-        usage_rate = self.coordinator.perform_oil_calibration()
-        
+        """Finalize calibration and compute usage rate."""
+        _LOGGER.info("Calibration finalize pressed for %s", self.coordinator.device_id)
+
+        usage_rate = self.coordinator.finalize_calibration()
+
         if usage_rate:
             _LOGGER.info(
                 "Oil calibration successful for %s: %.6f ml/sec (%.2f ml/hour)",
                 self.coordinator.device_id, usage_rate, usage_rate * 3600
             )
         else:
-            _LOGGER.warning("Oil calibration failed for %s - check runtime and measured values", 
-                          self.coordinator.device_id)
-        
+            _LOGGER.warning(
+                "Oil calibration failed for %s - check runtime and measured values",
+                self.coordinator.device_id,
+            )
+
+        self.coordinator.async_update_listeners()
+
+
+class AromaLinkOilRefillKeepCalibrationButton(CoordinatorEntity, ButtonEntity):
+    """Button to refill oil without resetting calibration."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Refill (Keep Calibration)"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_refill_keep_calibration"
+        self._attr_icon = "mdi:water-plus-outline"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self.coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_press(self):
+        """Refill oil and keep calibration rate."""
+        _LOGGER.info("Refill (keep calibration) pressed for %s", self.coordinator.device_id)
+        self.coordinator.refill_keep_calibration()
         self.coordinator.async_update_listeners()

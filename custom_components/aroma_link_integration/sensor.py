@@ -450,11 +450,16 @@ class AromaLinkOilLevelSensor(AromaLinkSensorBase):
         return {
             "device_id": self.coordinator.device_id,
             "calibrated": status.get("calibrated", False),
+            "calibration_state": status.get("calibration_state", "Idle"),
             "bottle_capacity_ml": status.get("bottle_capacity_ml"),
             "estimated_remaining_ml": status.get("estimated_remaining_ml"),
             "usage_rate_ml_per_hour": status.get("usage_rate_ml_per_hour"),
             "runtime_since_fill_hours": status.get("runtime_since_fill_hours"),
             "completed_cycles": status.get("completed_cycles"),
+            "fill_date": status.get("fill_date"),
+            "estimated_days_remaining_schedule": status.get("estimated_days_remaining_schedule"),
+            "effective_runtime_hours": status.get("effective_runtime_hours"),
+            "runtime_source": status.get("runtime_source"),
             # Visual helper - icon state
             "level_category": self._get_level_category(status.get("level_percent")),
         }
@@ -502,17 +507,14 @@ class AromaLinkOilRemainingSensor(AromaLinkSensorBase):
         """Return comprehensive oil status."""
         status = self.coordinator.get_oil_status()
         
-        # Estimate hours until empty
-        hours_remaining = None
-        if status.get("usage_rate_ml_per_hour") and status.get("estimated_remaining_ml"):
-            usage_per_hour = status["usage_rate_ml_per_hour"]
-            remaining = status["estimated_remaining_ml"]
-            if usage_per_hour > 0:
-                hours_remaining = remaining / usage_per_hour
+        # Schedule-based estimates
+        days_remaining = status.get("estimated_days_remaining_schedule")
+        hours_remaining = days_remaining * 24 if days_remaining is not None else None
         
         return {
             "device_id": self.coordinator.device_id,
             "calibrated": status.get("calibrated", False),
+            "calibration_state": status.get("calibration_state", "Idle"),
             "fill_volume_ml": status.get("fill_volume_ml"),
             "bottle_capacity_ml": status.get("bottle_capacity_ml"),
             "level_percent": status.get("level_percent"),
@@ -521,6 +523,10 @@ class AromaLinkOilRemainingSensor(AromaLinkSensorBase):
             "runtime_since_fill_sec": status.get("runtime_since_fill_sec"),
             "runtime_since_fill_hours": status.get("runtime_since_fill_hours"),
             "completed_cycles_since_fill": status.get("completed_cycles"),
-            "estimated_hours_remaining": round(hours_remaining, 1) if hours_remaining else None,
-            "estimated_days_remaining": round(hours_remaining / 24, 1) if hours_remaining else None,
+            "effective_runtime_sec": status.get("effective_runtime_sec"),
+            "effective_runtime_hours": status.get("effective_runtime_hours"),
+            "runtime_source": status.get("runtime_source"),
+            "estimated_hours_remaining_schedule": round(hours_remaining, 1) if hours_remaining else None,
+            "estimated_days_remaining_schedule": round(days_remaining, 1) if days_remaining else None,
+            "fill_date": status.get("fill_date"),
         }

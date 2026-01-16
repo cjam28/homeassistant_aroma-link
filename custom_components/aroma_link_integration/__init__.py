@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 from homeassistant.components.http import StaticPathConfig
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -261,6 +262,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Store coordinators for each device
     device_coordinators = {}
 
+    # Load persisted oil tracking/calibration state
+    oil_state_store = Store(hass, 1, f"{DOMAIN}_oil_state_{entry.entry_id}.json")
+    oil_state_data = await oil_state_store.async_load() or {}
+
+    async def _save_oil_state():
+        """Persist oil tracking/calibration state for all devices."""
+        data = {}
+        for dev_id, coord in device_coordinators.items():
+            data[dev_id] = coord.export_oil_state()
+        await oil_state_store.async_save(data)
+
     poll_interval_seconds = entry.options.get(
         CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_SECONDS
     )
@@ -282,6 +294,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             device_id=device_id,
             device_name=device_name,
             update_interval_seconds=poll_interval_seconds,
+            save_oil_state_cb=_save_oil_state,
+            oil_state=oil_state_data.get(str(device_id)) or oil_state_data.get(device_id),
         )
 
         # Do first refresh for each device

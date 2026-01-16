@@ -1,6 +1,7 @@
 """Number platform for Aroma-Link."""
 import logging
 from homeassistant.components.number import NumberEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import DeviceInfo
 
 from .const import (
@@ -303,11 +304,12 @@ class AromaLinkProgramPauseDuration(NumberEntity):
 # OIL TRACKING CALIBRATION ENTITIES
 # ============================================================
 
-class AromaLinkOilBottleCapacity(NumberEntity):
+class AromaLinkOilBottleCapacity(CoordinatorEntity, NumberEntity):
     """Maximum oil bottle capacity in ml."""
 
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize the entity."""
+        super().__init__(coordinator)
         self._coordinator = coordinator
         self._entry = entry
         self._device_id = device_id
@@ -347,11 +349,12 @@ class AromaLinkOilBottleCapacity(NumberEntity):
         self.async_write_ha_state()
 
 
-class AromaLinkOilFillVolume(NumberEntity):
+class AromaLinkOilFillVolume(CoordinatorEntity, NumberEntity):
     """Volume of oil at last fill in ml."""
 
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize the entity."""
+        super().__init__(coordinator)
         self._coordinator = coordinator
         self._entry = entry
         self._device_id = device_id
@@ -391,11 +394,12 @@ class AromaLinkOilFillVolume(NumberEntity):
         self.async_write_ha_state()
 
 
-class AromaLinkOilRemainingInput(NumberEntity):
+class AromaLinkOilRemainingInput(CoordinatorEntity, NumberEntity):
     """Input for current remaining oil volume (for calibration)."""
 
     def __init__(self, coordinator, entry, device_id, device_name):
         """Initialize the entity."""
+        super().__init__(coordinator)
         self._coordinator = coordinator
         self._entry = entry
         self._device_id = device_id

@@ -19,6 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         device_name = device_info["name"]
         entities.append(AromaLinkProgramStartTime(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkProgramEndTime(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilFillDate(coordinator, entry, device_id, device_name))
 
     async_add_entities(entities)
 
@@ -142,4 +143,54 @@ class AromaLinkProgramEndTime(CoordinatorEntity, TextEntity):
             schedule = self.coordinator._schedule_cache[day]
             if len(schedule) >= program_num:
                 schedule[program_num - 1]["end_time"] = value
+        self.async_write_ha_state()
+
+
+class AromaLinkOilFillDate(CoordinatorEntity, TextEntity):
+    """Oil fill date (YYYY-MM-DD)."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._device_id = device_id
+        self._device_name = device_name
+        self._name = f"{device_name} Oil Fill Date"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_fill_date"
+        self._attr_native_min = 0
+        self._attr_native_max = 10  # "YYYY-MM-DD"
+        self._attr_pattern = r"^\\d{4}-\\d{2}-\\d{2}$"
+        self._attr_icon = "mdi:calendar"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        """Return the name."""
+        return self._name
+
+    @property
+    def unique_id(self):
+        """Return unique ID."""
+        return self._unique_id
+
+    @property
+    def native_value(self):
+        """Return the fill date."""
+        return self.coordinator.get_oil_calibration().get("fill_date") or ""
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self.coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_set_value(self, value):
+        """Set the fill date."""
+        if not re.match(self._attr_pattern, value):
+            return
+        self.coordinator.set_oil_calibration(fill_date=value)
         self.async_write_ha_state()
