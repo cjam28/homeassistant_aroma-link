@@ -12,6 +12,8 @@ This custom component provides integration with Aroma-Link WiFi diffusers in Hom
 - Control diffuser power state (on/off)
 - Set diffuser work duration
 - Set diffuser schedules
+- **Full workset scheduling** - Up to 5 time programs per day with customizable start/end times, work/pause durations, and consistency levels
+- Multi-day schedule support
 - Run diffuser for specific durations
 - Automatic device discovery
 - Auto-detection of devices in your Aroma-Link account
@@ -85,13 +87,82 @@ Parameters:
 - `diffuse_time`: Total time in seconds for the diffuser to run (required)
 - `device_id`: The ID of the device to control (optional, required if you have multiple devices)
 
+### `aroma_link_integration.load_workset`
+
+Load workset schedule from device into helper entities. This allows you to view and edit the current schedule configuration.
+
+Parameters:
+
+- `device_id`: The ID of the device (optional, required if you have multiple devices)
+- `week_day`: Day of week to load (0=Monday, 1=Tuesday, ..., 6=Sunday). Defaults to 0.
+- `helper_prefix`: Prefix for helper entity IDs (e.g., "aromalink_poolhouse"). If not provided, uses device name.
+
+### `aroma_link_integration.save_workset`
+
+Save workset schedule from helper entities to device. This applies your configured schedule to the device.
+
+Parameters:
+
+- `device_id`: The ID of the device (optional, required if you have multiple devices)
+- `week_days`: List of weekdays to apply schedule to (0=Monday, 1=Tuesday, ..., 6=Sunday). Required.
+- `helper_prefix`: Prefix for helper entity IDs (e.g., "aromalink_poolhouse"). If not provided, uses device name.
+
 ## Entities
 
-The integration adds the following entities:
+The integration adds the following entities for each device:
 
-- **Switch**: Control the power state of the diffuser
-- **Button**: Send immediate commands to the diffuser
-- **Number**: Set work duration values
+- **Switches**:
+  - Power: Control the power state of the diffuser (on/off)
+  - Fan: Control the fan state (on/off)
+- **Button**: Send immediate commands to the diffuser (Run and Save Settings buttons)
+- **Number**: Set work duration and pause duration values
+- **Sensors**:
+  - Work Status (Off/Diffusing/Paused)
+  - Work Remaining Time (seconds)
+  - Pause Remaining Time (seconds)
+  - On Count (total activations)
+  - Pump Count (total diffusions)
+- **Schedule Entities** (per-program editor):
+  - Program Selector: Choose which program (1-5) to edit
+  - Program Enabled: Enable/disable the selected program
+  - Program Start Time: Start time for the program
+  - Program End Time: End time for the program
+  - Program Work Duration: Work duration in seconds (5-900)
+  - Program Pause Duration: Pause duration in seconds (5-900)
+  - Program Level: Consistency level (A/B/C)
+  - Program Day Switches: 7 switches (one per day) to select which days to apply the program
+  - Save Program: Button to save the edited program to selected days
+
+## Workset Scheduling
+
+The integration supports full workset scheduling with up to 5 time programs per day, similar to the Aroma-Link mobile app. Each program can have:
+- Start and end times
+- Work duration (seconds the diffuser runs)
+- Pause duration (seconds between work cycles)
+- Consistency level (A, B, or C)
+- Enable/disable toggle
+
+### Using Schedule Entities
+
+**✨ Native Entities:** The integration automatically creates native Home Assistant entities for schedule editing. No manual setup required!
+
+All schedule entities appear on your device page automatically. To edit a schedule:
+
+1. **Select a Program**: Use the "Program" selector to choose which program (1-5) you want to edit
+2. **Edit Program Settings**: Adjust the enabled state, start/end times, work/pause durations, and consistency level
+3. **Select Days**: Toggle the day switches (Monday-Sunday) to choose which days this program should apply to
+4. **Save**: Press the "Save Program" button to apply your changes
+
+The integration automatically:
+- Loads schedules on-demand when you view the device page
+- Merges your edited program into the full 5-program set for each selected day
+- Saves all changes to the device via the Aroma-Link API
+
+**Note:** Schedules are cached locally and only refreshed when needed. Changes made outside Home Assistant (via the app) will be reflected when you refresh the schedule or view the device page.
+
+### Legacy Services (Backward Compatibility)
+
+The `load_workset` and `save_workset` services are still available for backward compatibility, but the native entities provide a better user experience. These services work with helper entities if you prefer that approach.
 
 ## How It Works
 
@@ -117,7 +188,7 @@ The new auto-discovery feature eliminates the need to manually find your device 
 - All communication is done over HTTPS (encrypted but SSL certificate verification is disabled)
 - **SSL Verification Bypass**: This fork sets `VERIFY_SSL = False` to bypass certificate validation, allowing the integration to work even when Aroma-Link's SSL certificates are expired or invalid
 - Session management is handled with cookies and automatic re-login when needed
-- The integration checks device status every minute by default
+- **Important**: The integration polls device state (power, fan, sensors) every 1 minute. Schedule data is loaded on-demand when viewing the device page or when explicitly refreshed. This means any changes made outside of Home Assistant (e.g., via the Aroma-Link mobile app or website) will be reflected in Home Assistant within 1 minute for device state, or immediately when you view/edit schedules.
 
 ## Troubleshooting
 
@@ -137,8 +208,26 @@ A: Make sure your diffuser is connected to WiFi and properly set up in the Aroma
 **Q: How do I find my device ID?**  
 A: You don't need to! The integration automatically discovers your devices and lets you select which one to use from a list.
 
+**Q: What happens if I change settings in the Aroma-Link app?**  
+A: The integration polls device state every 1 minute, so power/fan changes will be reflected within 1 minute. Schedule changes are loaded on-demand when you view the device page or refresh the schedule.
+
+**Q: Can I set different schedules for different days of the week?**  
+A: Yes! Each day (Monday-Sunday) has its own set of 5 programs. When you edit a program and save it, you can select which days to apply it to. The integration automatically merges your edited program into the full 5-program set for each selected day.
+
 ## Version History
 
+- **1.3.0** (This fork): Native schedule entities and fan control
+  - Replaced helper-based system with native Home Assistant entities
+  - Added fan switch entity for fan on/off control
+  - Per-program editor with program selector, editor fields, and day selection
+  - On-demand schedule polling (no automatic polling)
+  - Schedule caching for performance
+  - All entities appear automatically on device page
+- **1.2.0** (This fork): Added full workset scheduling support
+  - Added `fetch_workset_for_day()` and `set_workset()` methods for reading/writing complete schedules
+  - Added `load_workset` and `save_workset` services for helper-based schedule management
+  - Support for up to 5 time programs per day with start/end times, work/pause durations, and consistency levels
+  - Multi-day schedule support (apply same schedule to multiple days)
 - **1.1.1** (This fork): Added SSL verification bypass to work around expired SSL certificates
   - Added `VERIFY_SSL = False` constant to disable SSL certificate verification
   - Updated all aiohttp requests to use `ssl=VERIFY_SSL` parameter

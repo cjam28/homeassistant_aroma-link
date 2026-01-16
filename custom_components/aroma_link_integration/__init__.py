@@ -8,6 +8,7 @@ from .AromaLinkDeviceCoordinator import AromaLinkDeviceCoordinator
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
+from homeassistant.helpers import entity_registry as er
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
@@ -16,6 +17,8 @@ from .const import (
     CONF_DEVICE_ID,
     SERVICE_SET_SCHEDULER,
     SERVICE_RUN_DIFFUSER,
+    SERVICE_LOAD_WORKSET,
+    SERVICE_SAVE_WORKSET,
     ATTR_WORK_DURATION,
     ATTR_PAUSE_DURATION,
     ATTR_WEEK_DAYS,
@@ -23,7 +26,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "button", "number", "sensor"]
+PLATFORMS = ["switch", "button", "number", "sensor", "schedule"]
 
 SET_SCHEDULER_SCHEMA = vol.Schema({
     vol.Required(ATTR_WORK_DURATION): vol.All(vol.Coerce(int), vol.Range(min=5, max=900)),
@@ -41,6 +44,57 @@ RUN_DIFFUSER_SCHEMA = vol.Schema({
 })
 
 
+async def _cleanup_old_helpers(hass: HomeAssistant, device_name: str):
+    """Remove old helper entities created by previous version of the integration."""
+    helper_prefix = f"aromalink_{device_name.lower().replace(' ', '_').replace('-', '_')}"
+    entity_registry = er.async_get(hass)
+    removed_count = 0
+    
+    # List of helper entity IDs to remove
+    helper_entities = []
+    
+    # Generate all possible helper entity IDs
+    for program_num in range(1, 6):
+        helper_entities.extend([
+            f"input_boolean.{helper_prefix}_program_{program_num}_enabled",
+            f"input_datetime.{helper_prefix}_program_{program_num}_start",
+            f"input_datetime.{helper_prefix}_program_{program_num}_end",
+            f"input_number.{helper_prefix}_program_{program_num}_work",
+            f"input_number.{helper_prefix}_program_{program_num}_pause",
+            f"input_select.{helper_prefix}_program_{program_num}_level",
+        ])
+    
+    # Also remove day selector if it exists
+    helper_entities.append(f"input_select.{helper_prefix}_selected_day")
+    
+    # Remove entities from registry and state
+    for entity_id in helper_entities:
+        # Remove from entity registry if it exists
+        registry_entity = entity_registry.async_get(entity_id)
+        if registry_entity:
+            try:
+                entity_registry.async_remove(entity_id)
+                _LOGGER.debug(f"Removed helper entity from registry: {entity_id}")
+                removed_count += 1
+            except Exception as e:
+                _LOGGER.warning(f"Failed to remove {entity_id} from registry: {e}")
+        
+        # Remove from state machine if it exists
+        if entity_id in hass.states.async_entity_ids():
+            try:
+                hass.states.async_remove(entity_id)
+                _LOGGER.debug(f"Removed helper entity from state: {entity_id}")
+                if entity_id not in [e.entity_id for e in entity_registry.entities.values()]:
+                    removed_count += 1
+            except Exception as e:
+                _LOGGER.warning(f"Failed to remove {entity_id} from state: {e}")
+    
+    if removed_count > 0:
+        _LOGGER.info(f"Cleaned up {removed_count} old helper entities for {device_name} (prefix: {helper_prefix})")
+    else:
+        _LOGGER.debug(f"No old helper entities found for {device_name} (prefix: {helper_prefix})")
+
+
 async def async_setup(hass: HomeAssistant, config: dict):
     """Set up the Aroma-Link component."""
     hass.data.setdefault(DOMAIN, {})
@@ -55,12 +109,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
-
-
-async def async_setup(hass: HomeAssistant, config: dict):
-    """Set up the Aroma-Link component."""
-    hass.data.setdefault(DOMAIN, {})
-    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
@@ -114,6 +162,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         try:
             await device_coordinator.async_config_entry_first_refresh()
             device_coordinators[device_id] = device_coordinator
+            
+            # Clean up old helper entities from previous version
+            try:
+                await _cleanup_old_helpers(hass, device_name)
+            except Exception as e:
+                _LOGGER.warning(f"Failed to cleanup old helpers for {device_name}: {e}")
         except Exception as e:
             _LOGGER.error(f"Error initializing device {device_id}: {e}")
 
@@ -173,6 +227,190 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         SERVICE_RUN_DIFFUSER,
         run_diffuser_service,
         schema=RUN_DIFFUSER_SCHEMA
+    )
+
+    async def load_workset_service(call: ServiceCall):
+        """Service to load workset from device into helper entities."""
+        device_id = call.data.get("device_id")
+        week_day = call.data.get("week_day", 0)
+        helper_prefix = call.data.get("helper_prefix")
+        
+        # Get coordinator
+        coordinator = None
+        if device_id and device_id in device_coordinators:
+            coordinator = device_coordinators[device_id]
+        elif len(device_coordinators) == 1:
+            coordinator = list(device_coordinators.values())[0]
+        else:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return
+        
+        if not helper_prefix:
+            # Use device name as prefix, sanitized
+            helper_prefix = f"aromalink_{coordinator.device_name.lower().replace(' ', '_').replace('-', '_')}"
+        
+        # Fetch workset from device
+        workset = await coordinator.fetch_workset_for_day(week_day)
+        if not workset:
+            _LOGGER.error(f"Failed to load workset for device {coordinator.device_id}")
+            return
+        
+        # Update helper entities
+        for i, program in enumerate(workset, 1):
+            # Enabled toggle
+            enabled_entity = f"input_boolean.{helper_prefix}_program_{i}_enabled"
+            if enabled_entity in hass.states.async_entity_ids():
+                hass.states.async_set(enabled_entity, "on" if program["enabled"] == 1 else "off")
+            
+            # Start time
+            start_entity = f"input_datetime.{helper_prefix}_program_{i}_start"
+            if start_entity in hass.states.async_entity_ids():
+                start_time = program["start_time"]
+                hass.states.async_set(start_entity, f"2024-01-01 {start_time}:00")
+            
+            # End time
+            end_entity = f"input_datetime.{helper_prefix}_program_{i}_end"
+            if end_entity in hass.states.async_entity_ids():
+                end_time = program["end_time"]
+                hass.states.async_set(end_entity, f"2024-01-01 {end_time}:00")
+            
+            # Work duration
+            work_entity = f"input_number.{helper_prefix}_program_{i}_work"
+            if work_entity in hass.states.async_entity_ids():
+                hass.states.async_set(work_entity, program["work_sec"])
+            
+            # Pause duration
+            pause_entity = f"input_number.{helper_prefix}_program_{i}_pause"
+            if pause_entity in hass.states.async_entity_ids():
+                hass.states.async_set(pause_entity, program["pause_sec"])
+            
+            # Level
+            level_entity = f"input_select.{helper_prefix}_program_{i}_level"
+            if level_entity in hass.states.async_entity_ids():
+                level_map = {1: "A", 2: "B", 3: "C"}
+                level = level_map.get(program["level"], "A")
+                hass.states.async_set(level_entity, level)
+        
+        _LOGGER.info(f"Loaded workset for device {coordinator.device_id} day {week_day} into helpers with prefix {helper_prefix}")
+
+    async def save_workset_service(call: ServiceCall):
+        """Service to save workset from helper entities to device."""
+        device_id = call.data.get("device_id")
+        week_days = call.data.get("week_days", [0, 1, 2, 3, 4, 5, 6])
+        helper_prefix = call.data.get("helper_prefix")
+        
+        # Get coordinator
+        coordinator = None
+        if device_id and device_id in device_coordinators:
+            coordinator = device_coordinators[device_id]
+        elif len(device_coordinators) == 1:
+            coordinator = list(device_coordinators.values())[0]
+        else:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return
+        
+        if not helper_prefix:
+            # Use device name as prefix, sanitized
+            helper_prefix = f"aromalink_{coordinator.device_name.lower().replace(' ', '_').replace('-', '_')}"
+        
+        # Build workTimeList from helper entities
+        work_time_list = []
+        for i in range(1, 6):  # 5 programs
+            # Get values from helpers
+            enabled_entity = f"input_boolean.{helper_prefix}_program_{i}_enabled"
+            start_entity = f"input_datetime.{helper_prefix}_program_{i}_start"
+            end_entity = f"input_datetime.{helper_prefix}_program_{i}_end"
+            work_entity = f"input_number.{helper_prefix}_program_{i}_work"
+            pause_entity = f"input_number.{helper_prefix}_program_{i}_pause"
+            level_entity = f"input_select.{helper_prefix}_program_{i}_level"
+            
+            enabled = 0
+            if enabled_entity in hass.states.async_entity_ids():
+                state = hass.states.get(enabled_entity)
+                enabled = 1 if state and state.state == "on" else 0
+            
+            start_time = "00:00"
+            if start_entity in hass.states.async_entity_ids():
+                state = hass.states.get(start_entity)
+                if state and state.state:
+                    # Extract time from datetime string
+                    try:
+                        dt_str = state.state
+                        if " " in dt_str:
+                            start_time = dt_str.split(" ")[1][:5]  # Extract HH:MM
+                    except:
+                        pass
+            
+            end_time = "23:59"
+            if end_entity in hass.states.async_entity_ids():
+                state = hass.states.get(end_entity)
+                if state and state.state:
+                    try:
+                        dt_str = state.state
+                        if " " in dt_str:
+                            end_time = dt_str.split(" ")[1][:5]  # Extract HH:MM
+                    except:
+                        pass
+            
+            work_duration = "10"
+            if work_entity in hass.states.async_entity_ids():
+                state = hass.states.get(work_entity)
+                if state and state.state:
+                    work_duration = str(int(float(state.state)))
+            
+            pause_duration = "120"
+            if pause_entity in hass.states.async_entity_ids():
+                state = hass.states.get(pause_entity)
+                if state and state.state:
+                    pause_duration = str(int(float(state.state)))
+            
+            level = "1"
+            if level_entity in hass.states.async_entity_ids():
+                state = hass.states.get(level_entity)
+                if state and state.state:
+                    level_map = {"A": "1", "B": "2", "C": "3"}
+                    level = level_map.get(state.state, "1")
+            
+            work_time_list.append({
+                "startTime": start_time,
+                "endTime": end_time,
+                "enabled": enabled,
+                "consistenceLevel": level,
+                "workDuration": work_duration,
+                "pauseDuration": pause_duration
+            })
+        
+        # Save to device
+        result = await coordinator.set_workset(week_days, work_time_list)
+        if result:
+            _LOGGER.info(f"Saved workset for device {coordinator.device_id} to days {week_days}")
+        else:
+            _LOGGER.error(f"Failed to save workset for device {coordinator.device_id}")
+
+    LOAD_WORKSET_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+        vol.Optional("week_day", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
+        vol.Optional("helper_prefix"): cv.string,
+    })
+
+    SAVE_WORKSET_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+        vol.Required("week_days"): vol.All(cv.ensure_list, [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))]),
+        vol.Optional("helper_prefix"): cv.string,
+    })
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LOAD_WORKSET,
+        load_workset_service,
+        schema=LOAD_WORKSET_SCHEMA
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SAVE_WORKSET,
+        save_workset_service,
+        schema=SAVE_WORKSET_SCHEMA
     )
 
     # Use the new method

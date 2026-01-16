@@ -26,3 +26,29 @@ run_diffuser:
     device_id:
       description: "The ID of the device to run. Required if multiple devices are available."
       example: "device_12345"
+
+load_workset:
+  description: "Load workset schedule from device and populate helper entities."
+  fields:
+    device_id:
+      description: "The ID of the device. Required if multiple devices are available."
+      example: "419933"
+    week_day:
+      description: "Day of week to load (0=Monday, 1=Tuesday, ..., 6=Sunday). Defaults to 0."
+      example: 0
+    helper_prefix:
+      description: "Prefix for helper entity IDs (e.g., 'aromalink_poolhouse'). If not provided, uses device name."
+      example: "aromalink_poolhouse"
+
+save_workset:
+  description: "Save workset schedule from helper entities to device."
+  fields:
+    device_id:
+      description: "The ID of the device. Required if multiple devices are available."
+      example: "419933"
+    week_days:
+      description: "List of weekdays to apply schedule to (0=Monday, 1=Tuesday, ..., 6=Sunday)."
+      example: [0, 1, 2, 3, 4, 5, 6]
+    helper_prefix:
+      description: "Prefix for helper entity IDs (e.g., 'aromalink_poolhouse'). Automatically created during setup if not provided."
+      example: "aromalink_poolhouse"
