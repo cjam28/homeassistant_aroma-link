@@ -26,7 +26,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "button", "number", "sensor", "workset"]
+PLATFORMS = ["switch", "button", "number", "sensor", "select", "text"]
 
 SET_SCHEDULER_SCHEMA = vol.Schema({
     vol.Required(ATTR_WORK_DURATION): vol.All(vol.Coerce(int), vol.Range(min=5, max=900)),
@@ -50,48 +50,39 @@ async def _cleanup_old_helpers(hass: HomeAssistant, device_name: str):
     entity_registry = er.async_get(hass)
     removed_count = 0
     config_entry_ids = set()
-    
-    # List of helper entity IDs to remove
-    helper_entities = []
-    
-    # Generate all possible helper entity IDs
-    for program_num in range(1, 6):
-        helper_entities.extend([
-            f"input_boolean.{helper_prefix}_program_{program_num}_enabled",
-            f"input_datetime.{helper_prefix}_program_{program_num}_start",
-            f"input_datetime.{helper_prefix}_program_{program_num}_end",
-            f"input_number.{helper_prefix}_program_{program_num}_work",
-            f"input_number.{helper_prefix}_program_{program_num}_pause",
-            f"input_select.{helper_prefix}_program_{program_num}_level",
-        ])
-    
-    # Also remove day selector if it exists
-    helper_entities.append(f"input_select.{helper_prefix}_selected_day")
-    
-    # Remove entities from registry and state, and collect helper config entries
-    for entity_id in helper_entities:
-        # Remove from entity registry if it exists
-        registry_entity = entity_registry.async_get(entity_id)
-        if registry_entity:
-            try:
-                if registry_entity.config_entry_id:
-                    config_entry_ids.add(registry_entity.config_entry_id)
-                entity_registry.async_remove(entity_id)
-                _LOGGER.debug(f"Removed helper entity from registry: {entity_id}")
-                removed_count += 1
-            except Exception as e:
-                _LOGGER.warning(f"Failed to remove {entity_id} from registry: {e}")
-        
-        # Remove from state machine if it exists
+    entity_ids_to_remove = set()
+
+    prefixes = (
+        f"input_boolean.{helper_prefix}_program_",
+        f"input_datetime.{helper_prefix}_program_",
+        f"input_number.{helper_prefix}_program_",
+        f"input_select.{helper_prefix}_program_",
+    )
+    selected_day_entity_id = f"input_select.{helper_prefix}_selected_day"
+
+    for reg_entity in entity_registry.entities.values():
+        entity_id = reg_entity.entity_id
+        if entity_id == selected_day_entity_id or entity_id.startswith(prefixes):
+            entity_ids_to_remove.add(entity_id)
+            if reg_entity.config_entry_id:
+                config_entry_ids.add(reg_entity.config_entry_id)
+
+    # Remove entities from registry and state
+    for entity_id in entity_ids_to_remove:
+        try:
+            entity_registry.async_remove(entity_id)
+            _LOGGER.debug(f"Removed helper entity from registry: {entity_id}")
+            removed_count += 1
+        except Exception as e:
+            _LOGGER.warning(f"Failed to remove {entity_id} from registry: {e}")
+
         if entity_id in hass.states.async_entity_ids():
             try:
                 hass.states.async_remove(entity_id)
                 _LOGGER.debug(f"Removed helper entity from state: {entity_id}")
-                if entity_id not in [e.entity_id for e in entity_registry.entities.values()]:
-                    removed_count += 1
             except Exception as e:
                 _LOGGER.warning(f"Failed to remove {entity_id} from state: {e}")
-    
+
     # Remove helper config entries (this actually deletes helpers so they don't come back)
     for entry_id in config_entry_ids:
         config_entry = hass.config_entries.async_get_entry(entry_id)

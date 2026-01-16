@@ -20,10 +20,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = []
     for device_id, coordinator in device_coordinators.items():
         device_info = coordinator.get_device_info()
+        device_name = device_info["name"]
         # Fetch current settings
         await coordinator.fetch_work_time_settings()
-        entities.append(AromaLinkWorkDurationNumber(coordinator, entry, device_id, device_info["name"]))
-        entities.append(AromaLinkPauseDurationNumber(coordinator, entry, device_id, device_info["name"]))
+        entities.append(AromaLinkWorkDurationNumber(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkPauseDurationNumber(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkProgramWorkDuration(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkProgramPauseDuration(coordinator, entry, device_id, device_name))
     
     async_add_entities(entities)
 
@@ -169,4 +172,122 @@ class AromaLinkPauseDurationNumber(NumberEntity):
     async def async_set_native_value(self, value):
         """Set the pause duration."""
         self._coordinator.pause_duration = int(value)
+        self.async_write_ha_state()
+
+
+class AromaLinkProgramWorkDuration(NumberEntity):
+    """Program work duration."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        self._coordinator = coordinator
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Program Work Duration"
+        self._unique_id = f"{entry.data['username']}_{device_id}_program_work_duration"
+        self._attr_native_min_value = 5
+        self._attr_native_max_value = 900
+        self._attr_native_step = 1
+        self._attr_native_unit_of_measurement = "sec"
+
+    @property
+    def name(self):
+        """Return the name of the number entity."""
+        return self._name
+
+    @property
+    def unique_id(self):
+        """Return a unique ID for this entity."""
+        return self._unique_id
+
+    @property
+    def native_value(self):
+        """Return the current value."""
+        program_num = self._coordinator._current_program
+        day = self._coordinator._current_day
+        if day in self._coordinator._schedule_cache:
+            schedule = self._coordinator._schedule_cache[day]
+            if len(schedule) >= program_num:
+                return float(schedule[program_num - 1].get("work_sec", 10))
+        return 10.0
+
+    @property
+    def device_info(self):
+        """Return device information about this Aroma-Link device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self._coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_set_native_value(self, value):
+        """Set the work duration."""
+        program_num = self._coordinator._current_program
+        day = self._coordinator._current_day
+        if day not in self._coordinator._schedule_cache:
+            await self._coordinator.async_refresh_schedule(day)
+        if day in self._coordinator._schedule_cache:
+            schedule = self._coordinator._schedule_cache[day]
+            if len(schedule) >= program_num:
+                schedule[program_num - 1]["work_sec"] = int(value)
+        self.async_write_ha_state()
+
+
+class AromaLinkProgramPauseDuration(NumberEntity):
+    """Program pause duration."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        self._coordinator = coordinator
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Program Pause Duration"
+        self._unique_id = f"{entry.data['username']}_{device_id}_program_pause_duration"
+        self._attr_native_min_value = 5
+        self._attr_native_max_value = 900
+        self._attr_native_step = 5
+        self._attr_native_unit_of_measurement = "sec"
+
+    @property
+    def name(self):
+        """Return the name of the number entity."""
+        return self._name
+
+    @property
+    def unique_id(self):
+        """Return a unique ID for this entity."""
+        return self._unique_id
+
+    @property
+    def native_value(self):
+        """Return the current value."""
+        program_num = self._coordinator._current_program
+        day = self._coordinator._current_day
+        if day in self._coordinator._schedule_cache:
+            schedule = self._coordinator._schedule_cache[day]
+            if len(schedule) >= program_num:
+                return float(schedule[program_num - 1].get("pause_sec", 120))
+        return 120.0
+
+    @property
+    def device_info(self):
+        """Return device information about this Aroma-Link device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self._coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_set_native_value(self, value):
+        """Set the pause duration."""
+        program_num = self._coordinator._current_program
+        day = self._coordinator._current_day
+        if day not in self._coordinator._schedule_cache:
+            await self._coordinator.async_refresh_schedule(day)
+        if day in self._coordinator._schedule_cache:
+            schedule = self._coordinator._schedule_cache[day]
+            if len(schedule) >= program_num:
+                schedule[program_num - 1]["pause_sec"] = int(value)
         self.async_write_ha_state()
