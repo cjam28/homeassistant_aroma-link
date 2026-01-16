@@ -108,11 +108,21 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "X-Requested-With": "XMLHttpRequest",
             "Origin": "https://www.aroma-link.com",
-            "Referer": "https://www.aroma-link.com/"
+            "Referer": "https://www.aroma-link.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
         
         try:
-            # First, attempt login to get JSESSIONID
+            # First, do an initial GET to establish cookies
+            _LOGGER.debug("Attempting initial GET to aroma-link.com for cookies.")
+            try:
+                async with session.get("https://www.aroma-link.com/", timeout=10, ssl=VERIFY_SSL) as initial_response:
+                    initial_response.raise_for_status()
+                    _LOGGER.debug(f"Initial GET successful (status {initial_response.status}).")
+            except Exception as e:
+                _LOGGER.warning(f"Initial GET request failed, but continuing: {e}")
+            
+            # Now attempt login to get JSESSIONID
             _LOGGER.debug(f"Attempting login for {username}")
             
             async with session.post(login_url, data=data, headers=headers, ssl=VERIFY_SSL) as response:
