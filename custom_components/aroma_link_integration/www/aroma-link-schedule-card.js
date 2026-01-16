@@ -1,9 +1,10 @@
 /**
- * Aroma-Link Schedule Card v1.7.0
+ * Aroma-Link Schedule Card v1.9.0
  * 
  * A complete dashboard card for Aroma-Link diffusers including:
- * - Manual controls (Power, Fan, Run)
- * - Schedule matrix with multi-cell editing
+ * - Manual controls (Power, Fan, Run Continuously, Run Timed with countdown)
+ * - Schedule matrix with multi-cell editing (per-device selections)
+ * - Copy schedule from another diffuser
  * 
  * Styled to match Mushroom/button-card aesthetics.
  * 
@@ -16,17 +17,129 @@ class AromaLinkScheduleCard extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
     this._initialized = false;
-    this._selectedCells = new Set();
+    // Per-device selection state: Map<deviceName, Set<"day-program">>
+    this._selectedCellsByDevice = new Map();
     this._isSaving = false;
     this._statusMessage = null;
-    this._editorValues = {
-      enabled: true,
-      startTime: '09:00',
-      endTime: '21:00',
-      workSec: 10,
-      pauseSec: 120,
-      level: 'A'
+    this._statusDevice = null; // Track which device the status is for
+    this._editorValuesByDevice = new Map(); // Per-device editor values
+    // Timer state: Map<deviceName, { endTime: number, intervalId: number, remainingSeconds: number }>
+    this._timersByDevice = new Map();
+    // Default timed run duration in minutes per device
+    this._timedRunMinutesByDevice = new Map();
+  }
+
+  _getTimedRunMinutes(deviceName) {
+    if (!this._timedRunMinutesByDevice.has(deviceName)) {
+      this._timedRunMinutesByDevice.set(deviceName, 30); // Default 30 minutes
+    }
+    return this._timedRunMinutesByDevice.get(deviceName);
+  }
+
+  _setTimedRunMinutes(deviceName, minutes) {
+    this._timedRunMinutesByDevice.set(deviceName, minutes);
+  }
+
+  _getTimerState(deviceName) {
+    return this._timersByDevice.get(deviceName);
+  }
+
+  _formatCountdown(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  async _startTimedRun(deviceName, controls, minutes) {
+    // First, turn on power and apply settings
+    await this._applySettingsAndRun(deviceName, controls);
+    
+    // Set up the timer
+    const endTime = Date.now() + (minutes * 60 * 1000);
+    const timerState = {
+      endTime,
+      remainingSeconds: minutes * 60,
+      intervalId: null
     };
+    
+    // Start countdown interval
+    timerState.intervalId = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((timerState.endTime - Date.now()) / 1000));
+      timerState.remainingSeconds = remaining;
+      
+      if (remaining <= 0) {
+        this._stopTimedRun(deviceName, controls);
+      } else {
+        this.render();
+      }
+    }, 1000);
+    
+    this._timersByDevice.set(deviceName, timerState);
+    this._showStatus(`Timer started: ${minutes} minutes`, false, deviceName);
+  }
+
+  async _stopTimedRun(deviceName, controls) {
+    const timerState = this._timersByDevice.get(deviceName);
+    if (timerState?.intervalId) {
+      clearInterval(timerState.intervalId);
+    }
+    this._timersByDevice.delete(deviceName);
+    
+    // Turn off the power
+    if (this._hass.states[controls.power]?.state === 'on') {
+      await this._hass.callService('switch', 'turn_off', { entity_id: controls.power });
+    }
+    
+    this._showStatus('Timer complete - turned off', false, deviceName);
+  }
+
+  _cancelTimer(deviceName) {
+    const timerState = this._timersByDevice.get(deviceName);
+    if (timerState?.intervalId) {
+      clearInterval(timerState.intervalId);
+    }
+    this._timersByDevice.delete(deviceName);
+    this.render();
+  }
+
+  async _applySettingsAndRun(deviceName, controls) {
+    // Save work/pause settings first
+    const saveSettingsBtn = `button.${deviceName}_save_settings`;
+    if (this._hass.states[saveSettingsBtn]) {
+      await this._hass.callService('button', 'press', { entity_id: saveSettingsBtn });
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // Then press the run button (which turns on power)
+    if (this._hass.states[controls.run]) {
+      await this._hass.callService('button', 'press', { entity_id: controls.run });
+    }
+  }
+
+  async _runContinuously(deviceName, controls) {
+    await this._applySettingsAndRun(deviceName, controls);
+    this._showStatus('Running continuously', false, deviceName);
+  }
+
+  _getEditorValues(deviceName) {
+    if (!this._editorValuesByDevice.has(deviceName)) {
+      this._editorValuesByDevice.set(deviceName, {
+        enabled: true,
+        startTime: '09:00',
+        endTime: '21:00',
+        workSec: 10,
+        pauseSec: 120,
+        level: 'A'
+      });
+    }
+    return this._editorValuesByDevice.get(deviceName);
+  }
+
+  _getSelectedCells(deviceName) {
+    if (!this._selectedCellsByDevice.has(deviceName)) {
+      this._selectedCellsByDevice.set(deviceName, new Set());
+    }
+    return this._selectedCellsByDevice.get(deviceName);
   }
 
   setConfig(config) {
@@ -92,57 +205,26 @@ class AromaLinkScheduleCard extends HTMLElement {
     };
   }
 
-  _isCellSelected(day, program) {
-    return this._selectedCells.has(`${day}-${program}`);
+  _isCellSelected(deviceName, day, program) {
+    return this._getSelectedCells(deviceName).has(`${day}-${program}`);
   }
 
-  _toggleCell(day, program) {
+  _toggleCell(deviceName, day, program, sensor = null) {
+    const cells = this._getSelectedCells(deviceName);
     const key = `${day}-${program}`;
-    if (this._selectedCells.has(key)) {
-      this._selectedCells.delete(key);
+    if (cells.has(key)) {
+      cells.delete(key);
     } else {
-      this._selectedCells.add(key);
-    }
-    this._editorLoaded = false;
-    this.render();
-  }
-
-  _selectProgramRow(program) {
-    const allSelected = [0,1,2,3,4,5,6].every(day => this._selectedCells.has(`${day}-${program}`));
-    
-    if (allSelected) {
-      for (let day = 0; day < 7; day++) {
-        this._selectedCells.delete(`${day}-${program}`);
-      }
-    } else {
-      for (let day = 0; day < 7; day++) {
-        this._selectedCells.add(`${day}-${program}`);
+      cells.add(key);
+      // Load the clicked cell's data into the editor
+      if (sensor) {
+        this._loadCellIntoEditor(sensor, day, program);
       }
     }
-    this._editorLoaded = false;
     this.render();
   }
 
-  _selectAll() {
-    for (let day = 0; day < 7; day++) {
-      for (let prog = 1; prog <= 5; prog++) {
-        this._selectedCells.add(`${day}-${prog}`);
-      }
-    }
-    this._editorLoaded = false;
-    this.render();
-  }
-
-  _clearSelection() {
-    this._selectedCells.clear();
-    this.render();
-  }
-
-  _loadSelectedIntoEditor(sensor) {
-    if (this._selectedCells.size === 0) return;
-    
-    const firstKey = Array.from(this._selectedCells)[0];
-    const [day, program] = firstKey.split('-').map(Number);
+  _loadCellIntoEditor(sensor, day, program) {
     const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const dayName = days[day];
     
@@ -150,14 +232,73 @@ class AromaLinkScheduleCard extends HTMLElement {
     const dayData = matrix[dayName] || {};
     const progData = dayData[`program_${program}`] || {};
     
-    this._editorValues = {
-      enabled: progData.enabled === true || progData.enabled === 1,
-      startTime: (progData.start_time || progData.start || '09:00').substring(0, 5),
-      endTime: (progData.end_time || progData.end || '21:00').substring(0, 5),
-      workSec: progData.work || progData.work_sec || 10,
-      pauseSec: progData.pause || progData.pause_sec || 120,
-      level: progData.level || 'A'
-    };
+    const editorValues = this._getEditorValues(sensor.deviceName);
+    editorValues.enabled = progData.enabled === true || progData.enabled === 1;
+    editorValues.startTime = (progData.start_time || progData.start || '09:00').substring(0, 5);
+    editorValues.endTime = (progData.end_time || progData.end || '21:00').substring(0, 5);
+    editorValues.workSec = progData.work || progData.work_sec || 10;
+    editorValues.pauseSec = progData.pause || progData.pause_sec || 120;
+    editorValues.level = progData.level || 'A';
+  }
+
+  _selectProgramRow(deviceName, program) {
+    const cells = this._getSelectedCells(deviceName);
+    const allSelected = [0,1,2,3,4,5,6].every(day => cells.has(`${day}-${program}`));
+    
+    if (allSelected) {
+      for (let day = 0; day < 7; day++) {
+        cells.delete(`${day}-${program}`);
+      }
+    } else {
+      for (let day = 0; day < 7; day++) {
+        cells.add(`${day}-${program}`);
+      }
+    }
+    this.render();
+  }
+
+  _selectAll(deviceName) {
+    const cells = this._getSelectedCells(deviceName);
+    for (let day = 0; day < 7; day++) {
+      for (let prog = 1; prog <= 5; prog++) {
+        cells.add(`${day}-${prog}`);
+      }
+    }
+    this.render();
+  }
+
+  _selectDayColumn(deviceName, day) {
+    const cells = this._getSelectedCells(deviceName);
+    const allSelected = [1,2,3,4,5].every(prog => cells.has(`${day}-${prog}`));
+    
+    if (allSelected) {
+      for (let prog = 1; prog <= 5; prog++) {
+        cells.delete(`${day}-${prog}`);
+      }
+    } else {
+      for (let prog = 1; prog <= 5; prog++) {
+        cells.add(`${day}-${prog}`);
+      }
+    }
+    this.render();
+  }
+
+  // Check if selection has multiple programs on same day (disables time editing)
+  _hasMultipleProgramsSameDay(deviceName) {
+    const cells = this._getSelectedCells(deviceName);
+    const dayProgramCount = {};
+    
+    for (const key of cells) {
+      const [day] = key.split('-').map(Number);
+      dayProgramCount[day] = (dayProgramCount[day] || 0) + 1;
+      if (dayProgramCount[day] > 1) return true;
+    }
+    return false;
+  }
+
+  _clearSelection(deviceName) {
+    this._getSelectedCells(deviceName).clear();
+    this.render();
   }
 
   _isValidTime(time) {
@@ -174,6 +315,7 @@ class AromaLinkScheduleCard extends HTMLElement {
     const dayName = days[day];
     const matrix = sensor.matrix || {};
     const dayData = matrix[dayName] || {};
+    const cells = this._getSelectedCells(sensor.deviceName);
     
     const newStartMin = this._timeToMinutes(newStart);
     const newEndMin = this._timeToMinutes(newEnd);
@@ -182,7 +324,7 @@ class AromaLinkScheduleCard extends HTMLElement {
     
     for (let prog = 1; prog <= 5; prog++) {
       if (prog === programToUpdate) continue;
-      if (this._selectedCells.has(`${day}-${prog}`)) continue;
+      if (cells.has(`${day}-${prog}`)) continue;
       
       const progData = dayData[`program_${prog}`] || {};
       const isEnabled = progData.enabled === true || progData.enabled === 1;
@@ -201,12 +343,14 @@ class AromaLinkScheduleCard extends HTMLElement {
     return overlaps;
   }
 
-  _showStatus(message, isError = false) {
+  _showStatus(message, isError = false, deviceName = null) {
     this._statusMessage = { text: message, isError };
+    this._statusDevice = deviceName;
     this.render();
     
     setTimeout(() => {
       this._statusMessage = null;
+      this._statusDevice = null;
       this.render();
     }, 4000);
   }
@@ -238,36 +382,57 @@ class AromaLinkScheduleCard extends HTMLElement {
     }
   }
 
+  async _clearSelectedSchedules(sensor) {
+    const cells = this._getSelectedCells(sensor.deviceName);
+    
+    if (cells.size === 0) {
+      this._showStatus('No cells selected.', true, sensor.deviceName);
+      return;
+    }
+
+    // Set editor to disabled state
+    const editorValues = this._getEditorValues(sensor.deviceName);
+    editorValues.enabled = false;
+    
+    // Now save with enabled=false
+    await this._saveSelectedCells(sensor);
+    
+    this._showStatus(`✓ Cleared ${cells.size} schedule(s)`, false, sensor.deviceName);
+  }
+
   async _saveSelectedCells(sensor) {
-    if (this._selectedCells.size === 0) {
-      this._showStatus('No cells selected. Click cells in the grid to select them.', true);
+    const cells = this._getSelectedCells(sensor.deviceName);
+    const editorValues = this._getEditorValues(sensor.deviceName);
+    
+    if (cells.size === 0) {
+      this._showStatus('No cells selected. Click cells in the grid to select them.', true, sensor.deviceName);
       return;
     }
 
-    if (!this._isValidTime(this._editorValues.startTime)) {
-      this._showStatus('Invalid start time. Use HH:MM format (e.g., 09:00)', true);
+    if (!this._isValidTime(editorValues.startTime)) {
+      this._showStatus('Invalid start time. Use HH:MM format (e.g., 09:00)', true, sensor.deviceName);
       return;
     }
-    if (!this._isValidTime(this._editorValues.endTime)) {
-      this._showStatus('Invalid end time. Use HH:MM format (e.g., 21:00)', true);
+    if (!this._isValidTime(editorValues.endTime)) {
+      this._showStatus('Invalid end time. Use HH:MM format (e.g., 21:00)', true, sensor.deviceName);
       return;
     }
 
-    const startMin = this._timeToMinutes(this._editorValues.startTime);
-    const endMin = this._timeToMinutes(this._editorValues.endTime);
+    const startMin = this._timeToMinutes(editorValues.startTime);
+    const endMin = this._timeToMinutes(editorValues.endTime);
     if (endMin <= startMin) {
-      this._showStatus('End time must be after start time.', true);
+      this._showStatus('End time must be after start time.', true, sensor.deviceName);
       return;
     }
 
     const daySelections = {};
-    for (const key of this._selectedCells) {
+    for (const key of cells) {
       const [day, program] = key.split('-').map(Number);
       if (!daySelections[day]) daySelections[day] = [];
       daySelections[day].push(program);
     }
 
-    if (this._editorValues.enabled) {
+    if (editorValues.enabled) {
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const overlapDays = [];
       
@@ -276,8 +441,8 @@ class AromaLinkScheduleCard extends HTMLElement {
         for (const program of programs) {
           const overlaps = this._checkOverlaps(
             sensor, day, program,
-            this._editorValues.startTime,
-            this._editorValues.endTime
+            editorValues.startTime,
+            editorValues.endTime
           );
           if (overlaps.length > 0 && !overlapDays.includes(dayNames[day])) {
             overlapDays.push(dayNames[day]);
@@ -286,14 +451,14 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
 
       if (overlapDays.length > 0) {
-        this._showStatus(`Schedules in ${overlapDays.join(', ')} are overlapping. Please correct the times.`, true);
+        this._showStatus(`Schedules in ${overlapDays.join(', ')} are overlapping. Please correct the times.`, true, sensor.deviceName);
         return;
       }
     }
 
     const deviceId = sensor.deviceId;
     if (!deviceId) {
-      this._showStatus('Device ID not found. Cannot save.', true);
+      this._showStatus('Device ID not found. Cannot save.', true, sensor.deviceName);
       return;
     }
 
@@ -317,7 +482,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           
           const enabledEntity = `switch.${prefix}_program_enabled`;
           if (this._hass.states[enabledEntity]) {
-            await this._hass.callService('switch', this._editorValues.enabled ? 'turn_on' : 'turn_off', {
+            await this._hass.callService('switch', editorValues.enabled ? 'turn_on' : 'turn_off', {
               entity_id: enabledEntity
             });
           }
@@ -326,7 +491,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           if (this._hass.states[startEntity]) {
             await this._hass.callService('text', 'set_value', {
               entity_id: startEntity,
-              value: this._editorValues.startTime
+              value: editorValues.startTime
             });
           }
           
@@ -334,7 +499,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           if (this._hass.states[endEntity]) {
             await this._hass.callService('text', 'set_value', {
               entity_id: endEntity,
-              value: this._editorValues.endTime
+              value: editorValues.endTime
             });
           }
           
@@ -342,7 +507,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           if (this._hass.states[workEntity]) {
             await this._hass.callService('number', 'set_value', {
               entity_id: workEntity,
-              value: this._editorValues.workSec
+              value: editorValues.workSec
             });
           }
           
@@ -350,7 +515,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           if (this._hass.states[pauseEntity]) {
             await this._hass.callService('number', 'set_value', {
               entity_id: pauseEntity,
-              value: this._editorValues.pauseSec
+              value: editorValues.pauseSec
             });
           }
           
@@ -358,7 +523,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           if (this._hass.states[levelEntity]) {
             await this._hass.callService('select', 'select_option', {
               entity_id: levelEntity,
-              option: `Level ${this._editorValues.level}`
+              option: editorValues.level
             });
           }
           
@@ -390,18 +555,18 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       this._isSaving = false;
-      this._selectedCells.clear();
-      this._showStatus(`✓ Saved ${Object.values(daySelections).flat().length} schedule(s) to Aroma-Link`);
+      cells.clear();
+      this._showStatus(`✓ Saved ${Object.values(daySelections).flat().length} schedule(s) to Aroma-Link`, false, sensor.deviceName);
       
     } catch (error) {
       console.error('Error saving schedules:', error);
       this._isSaving = false;
-      this._showStatus('Error saving schedules. Check console for details.', true);
+      this._showStatus('Error saving schedules. Check console for details.', true, sensor.deviceName);
     }
   }
 
   async _pullSchedule(sensor) {
-    this._showStatus('Pulling schedule from Aroma-Link...');
+    this._showStatus('Pulling schedule from Aroma-Link...', false, sensor.deviceName);
     
     const syncButton = `button.${sensor.deviceName}_sync_schedules`;
     if (this._hass.states[syncButton]) {
@@ -413,8 +578,140 @@ class AromaLinkScheduleCard extends HTMLElement {
     }
     
     setTimeout(() => {
-      this._showStatus('✓ Schedule refreshed from Aroma-Link');
+      this._showStatus('✓ Schedule refreshed from Aroma-Link', false, sensor.deviceName);
     }, 1000);
+  }
+
+  async _copyScheduleFrom(targetSensor, sourceSensor) {
+    if (!sourceSensor || !targetSensor) {
+      this._showStatus('Please select a source diffuser.', true, targetSensor.deviceName);
+      return;
+    }
+
+    if (sourceSensor.deviceName === targetSensor.deviceName) {
+      this._showStatus('Cannot copy to the same device.', true, targetSensor.deviceName);
+      return;
+    }
+
+    this._showStatus(`Copying schedule from ${sourceSensor.friendlyName}...`, false, targetSensor.deviceName);
+    this._isSaving = true;
+    this.render();
+
+    try {
+      const sourceMatrix = sourceSensor.matrix || {};
+      const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const daySwitches = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+      // For each day, copy all 5 programs from source to target
+      for (let day = 0; day < 7; day++) {
+        const dayName = days[day];
+        const sourceDayData = sourceMatrix[dayName] || {};
+
+        // For each program
+        for (let prog = 1; prog <= 5; prog++) {
+          const sourceProgData = sourceDayData[`program_${prog}`] || {};
+          
+          // Set the editor program on target device
+          await this._hass.callService('aroma_link_integration', 'set_editor_program', {
+            device_id: targetSensor.deviceId,
+            day: day,
+            program: prog
+          });
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+          const prefix = targetSensor.deviceName;
+          const isEnabled = sourceProgData.enabled === true || sourceProgData.enabled === 1;
+          const startTime = (sourceProgData.start_time || sourceProgData.start || '00:00').substring(0, 5);
+          const endTime = (sourceProgData.end_time || sourceProgData.end || '23:59').substring(0, 5);
+          const workSec = sourceProgData.work || sourceProgData.work_sec || 10;
+          const pauseSec = sourceProgData.pause || sourceProgData.pause_sec || 120;
+          const level = sourceProgData.level || 'A';
+
+          // Set enabled state
+          const enabledEntity = `switch.${prefix}_program_enabled`;
+          if (this._hass.states[enabledEntity]) {
+            await this._hass.callService('switch', isEnabled ? 'turn_on' : 'turn_off', {
+              entity_id: enabledEntity
+            });
+          }
+
+          // Set times
+          const startEntity = `text.${prefix}_program_start_time`;
+          if (this._hass.states[startEntity]) {
+            await this._hass.callService('text', 'set_value', {
+              entity_id: startEntity,
+              value: startTime
+            });
+          }
+
+          const endEntity = `text.${prefix}_program_end_time`;
+          if (this._hass.states[endEntity]) {
+            await this._hass.callService('text', 'set_value', {
+              entity_id: endEntity,
+              value: endTime
+            });
+          }
+
+          // Set work/pause
+          const workEntity = `number.${prefix}_program_work_time`;
+          if (this._hass.states[workEntity]) {
+            await this._hass.callService('number', 'set_value', {
+              entity_id: workEntity,
+              value: workSec
+            });
+          }
+
+          const pauseEntity = `number.${prefix}_program_pause_time`;
+          if (this._hass.states[pauseEntity]) {
+            await this._hass.callService('number', 'set_value', {
+              entity_id: pauseEntity,
+              value: pauseSec
+            });
+          }
+
+          // Set level
+          const levelEntity = `select.${prefix}_program_level`;
+          if (this._hass.states[levelEntity]) {
+            await this._hass.callService('select', 'select_option', {
+              entity_id: levelEntity,
+              option: level
+            });
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        // Turn off all day switches first
+        for (let d = 0; d < 7; d++) {
+          const switchEntity = `switch.${targetSensor.deviceName}_program_${daySwitches[d]}`;
+          if (this._hass.states[switchEntity]) {
+            await this._hass.callService('switch', 'turn_off', { entity_id: switchEntity });
+          }
+        }
+
+        // Turn on only the current day
+        const daySwitch = `switch.${targetSensor.deviceName}_program_${daySwitches[day]}`;
+        if (this._hass.states[daySwitch]) {
+          await this._hass.callService('switch', 'turn_on', { entity_id: daySwitch });
+        }
+
+        // Save this day
+        const saveButton = `button.${targetSensor.deviceName}_save_program`;
+        if (this._hass.states[saveButton]) {
+          await this._hass.callService('button', 'press', { entity_id: saveButton });
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      this._isSaving = false;
+      this._showStatus(`✓ Copied full schedule from ${sourceSensor.friendlyName}`, false, targetSensor.deviceName);
+
+    } catch (error) {
+      console.error('Error copying schedule:', error);
+      this._isSaving = false;
+      this._showStatus('Error copying schedule. Check console for details.', true, targetSensor.deviceName);
+    }
   }
 
   render() {
@@ -446,15 +743,15 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     let html = `<style>${this._getStyles()}</style>`;
 
+    // Build list of other devices for "Copy from" feature
+    const allDeviceNames = sensors.map(s => ({ deviceName: s.deviceName, friendlyName: s.friendlyName }));
+
     for (const sensor of sensors) {
       const matrix = sensor.matrix || {};
-      const selectionCount = this._selectedCells.size;
+      const cells = this._getSelectedCells(sensor.deviceName);
+      const selectionCount = cells.size;
+      const editorValues = this._getEditorValues(sensor.deviceName);
       const controls = this._getControlEntities(sensor.deviceName);
-
-      if (selectionCount > 0 && !this._editorLoaded) {
-        this._loadSelectedIntoEditor(sensor);
-        this._editorLoaded = true;
-      }
 
       // Get current states for controls
       const powerState = this._hass.states[controls.power];
@@ -467,6 +764,17 @@ class AromaLinkScheduleCard extends HTMLElement {
       const workDurValue = workDurState?.state || '10';
       const pauseDurValue = pauseDurState?.state || '120';
 
+      // Other devices for copy dropdown
+      const otherDevices = allDeviceNames.filter(d => d.deviceName !== sensor.deviceName);
+
+      // Status message for this device only
+      const showStatus = this._statusMessage && (this._statusDevice === sensor.deviceName || this._statusDevice === null);
+
+      // Get timer state for this device
+      const timerState = this._getTimerState(sensor.deviceName);
+      const isTimerRunning = !!timerState;
+      const timedRunMinutes = this._getTimedRunMinutes(sensor.deviceName);
+
       html += `
         <ha-card>
           <div class="card-header">
@@ -477,7 +785,9 @@ class AromaLinkScheduleCard extends HTMLElement {
             <!-- ===== MANUAL CONTROLS SECTION ===== -->
             <div class="controls-section">
               <div class="section-title">Manual Controls</div>
-              <div class="controls-grid">
+              
+              <!-- Power & Fan Row -->
+              <div class="controls-row">
                 <div class="control-item">
                   <button class="control-btn ${isPowerOn ? 'on' : 'off'}" 
                           data-action="toggle-power" data-entity="${controls.power}">
@@ -494,6 +804,10 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <span class="control-state">${isFanOn ? 'ON' : 'OFF'}</span>
                   </button>
                 </div>
+              </div>
+
+              <!-- Work/Pause Settings Row -->
+              <div class="controls-row settings-row">
                 <div class="control-item duration-control">
                   <label>Work</label>
                   <input type="number" class="duration-input" data-entity="${controls.workDuration}" 
@@ -506,11 +820,42 @@ class AromaLinkScheduleCard extends HTMLElement {
                          value="${pauseDurValue}" min="1" max="9999">
                   <span class="unit">sec</span>
                 </div>
-                <div class="control-item">
-                  <button class="run-btn" data-action="run" data-entity="${controls.run}">
-                    ▶ Run Now
-                  </button>
-                </div>
+              </div>
+
+              <!-- Apply Settings and Run Section -->
+              <div class="run-section">
+                <div class="run-section-title">Apply Settings and...</div>
+                
+                ${isTimerRunning ? `
+                  <!-- Timer Running State -->
+                  <div class="timer-display">
+                    <div class="timer-countdown">
+                      <span class="timer-icon">⏱️</span>
+                      <span class="timer-time">${this._formatCountdown(timerState.remainingSeconds)}</span>
+                      <span class="timer-label">remaining</span>
+                    </div>
+                    <button class="cancel-timer-btn" data-action="cancel-timer" data-device="${sensor.deviceName}">
+                      ✕ Cancel Timer
+                    </button>
+                  </div>
+                ` : `
+                  <!-- Run Buttons -->
+                  <div class="run-buttons">
+                    <button class="run-btn continuous" data-action="run-continuous" data-device="${sensor.deviceName}">
+                      ▶ Run Continuously
+                    </button>
+                    <div class="timed-run-group">
+                      <button class="run-btn timed" data-action="run-timed" data-device="${sensor.deviceName}">
+                        ⏱ Run Timed
+                      </button>
+                      <div class="timed-input-group">
+                        <input type="number" class="timed-minutes-input" data-device="${sensor.deviceName}"
+                               value="${timedRunMinutes}" min="1" max="480" title="Minutes to run">
+                        <span class="unit">min</span>
+                      </div>
+                    </div>
+                  </div>
+                `}
               </div>
             </div>
             
@@ -522,47 +867,65 @@ class AromaLinkScheduleCard extends HTMLElement {
               </div>
               
               <div class="quick-actions">
-                <button class="chip-btn" data-action="select-all">Select All</button>
-                <button class="chip-btn" data-action="clear-selection" ${selectionCount === 0 ? 'disabled' : ''}>
+                <button class="chip-btn" data-action="select-all" data-device="${sensor.deviceName}">Select All</button>
+                <button class="chip-btn" data-action="clear-selection" data-device="${sensor.deviceName}" ${selectionCount === 0 ? 'disabled' : ''}>
                   Clear ${selectionCount > 0 ? `(${selectionCount})` : ''}
                 </button>
                 <button class="chip-btn pull-btn" data-action="pull" data-device="${sensor.deviceName}">
-                  ↓ Pull Schedule
+                  ↓ Pull Aroma-Link App Schedule
                 </button>
               </div>
               
-              <div class="schedule-grid">
+              <!-- Color Legend -->
+              <div class="legend">
+                <span class="legend-item"><span class="legend-dot enabled"></span> Enabled</span>
+                <span class="legend-item"><span class="legend-dot has-settings"></span> Disabled (has settings)</span>
+                <span class="legend-item"><span class="legend-dot empty"></span> Empty</span>
+                <span class="legend-item"><span class="legend-dot selected"></span> Selected</span>
+              </div>
+
+              <div class="schedule-grid" data-device="${sensor.deviceName}">
                 <div class="grid-cell header corner"></div>
-                ${dayLabels.map((d, idx) => `
-                  <div class="grid-cell header ${idx === todayIndex ? 'today' : ''}">${d}</div>
-                `).join('')}
+                ${dayLabels.map((d, idx) => {
+                  const allProgsSelected = [1,2,3,4,5].every(p => cells.has(`${idx}-${p}`));
+                  return `
+                    <div class="grid-cell header day-header ${idx === todayIndex ? 'today' : ''} ${allProgsSelected ? 'col-selected' : ''}" 
+                         data-action="select-day" data-day="${idx}" data-device="${sensor.deviceName}"
+                         title="Click to select all programs for ${d}">
+                      ${d}
+                    </div>
+                  `;
+                }).join('')}
                 
                 ${programs.map(prog => {
-                  const allDaysSelected = [0,1,2,3,4,5,6].every(d => this._selectedCells.has(`${d}-${prog}`));
+                  const allDaysSelected = [0,1,2,3,4,5,6].every(d => cells.has(`${d}-${prog}`));
                   return `
                     <div class="grid-cell header program-label ${allDaysSelected ? 'row-selected' : ''}" 
-                         data-action="select-row" data-program="${prog}">
+                         data-action="select-row" data-program="${prog}" data-device="${sensor.deviceName}">
                       P${prog}
                     </div>
                     ${days.map((day, dayIdx) => {
                       const dayData = matrix[day] || {};
                       const progData = dayData[`program_${prog}`] || {};
                       const isEnabled = progData.enabled === true || progData.enabled === 1;
-                      const startTime = (progData.start_time || progData.start || '--:--').substring(0, 5);
-                      const endTime = (progData.end_time || progData.end || '--:--').substring(0, 5);
+                      const startTime = (progData.start_time || progData.start || '00:00').substring(0, 5);
+                      const endTime = (progData.end_time || progData.end || '23:59').substring(0, 5);
                       const level = progData.level || 'A';
                       const work = progData.work || progData.work_sec || 0;
                       const pause = progData.pause || progData.pause_sec || 0;
-                      const isSelected = this._isCellSelected(dayIdx, prog);
+                      const isSelected = this._isCellSelected(sensor.deviceName, dayIdx, prog);
                       const isToday = dayIdx === todayIndex;
                       
+                      // Check if cell has non-default settings
+                      const hasSettings = startTime !== '00:00' || endTime !== '23:59' || work > 0 || pause > 0;
+                      const cellClass = isEnabled ? 'enabled' : (hasSettings ? 'has-settings' : 'empty');
+                      
                       return `
-                        <div class="grid-cell schedule-cell ${isEnabled ? 'enabled' : 'disabled'} ${isSelected ? 'selected' : ''} ${isToday ? 'today-col' : ''}" 
-                             data-action="toggle-cell" data-day="${dayIdx}" data-program="${prog}">
-                          ${isEnabled ? `
-                            <span class="time">${startTime}</span>
-                            <span class="time">${endTime}</span>
-                            <span class="meta">${work}/${pause} [L${level}]</span>
+                        <div class="grid-cell schedule-cell ${cellClass} ${isSelected ? 'selected' : ''} ${isToday ? 'today-col' : ''}" 
+                             data-action="toggle-cell" data-day="${dayIdx}" data-program="${prog}" data-device="${sensor.deviceName}">
+                          ${isEnabled || hasSettings ? `
+                            <span class="cell-time">${startTime}-${endTime}</span>
+                            <span class="cell-meta">${work}/${pause} [L${level}]</span>
                           ` : '<span class="off-label">OFF</span>'}
                         </div>
                       `;
@@ -571,64 +934,101 @@ class AromaLinkScheduleCard extends HTMLElement {
                 }).join('')}
               </div>
               
-              ${this._statusMessage ? `
+              ${showStatus ? `
                 <div class="status-message ${this._statusMessage.isError ? 'error' : 'success'}">
                   ${this._statusMessage.text}
                 </div>
               ` : ''}
               
               <!-- Editor -->
-              <div class="editor-section ${selectionCount === 0 ? 'disabled' : ''}">
+              ${(() => {
+                const multiProgSameDay = this._hasMultipleProgramsSameDay(sensor.deviceName);
+                const timeDisabled = multiProgSameDay ? 'disabled' : '';
+                const timeDisabledClass = multiProgSameDay ? 'time-disabled' : '';
+                return `
+              <div class="editor-section ${selectionCount === 0 ? 'disabled' : ''}" data-device="${sensor.deviceName}">
                 <div class="editor-title">
                   ${selectionCount > 0 
                     ? `Editing ${selectionCount} Cell${selectionCount > 1 ? 's' : ''}` 
                     : 'Select cells above to edit'}
                 </div>
+                ${multiProgSameDay ? `
+                  <div class="time-warning">
+                    ⚠️ Multiple programs on same day selected - times locked (schedules can't overlap)
+                  </div>
+                ` : ''}
                 
                 <div class="editor-grid">
                   <div class="editor-row">
                     <label>Enabled</label>
                     <label class="toggle-switch">
-                      <input type="checkbox" data-field="enabled" ${this._editorValues.enabled ? 'checked' : ''}>
+                      <input type="checkbox" data-field="enabled" data-device="${sensor.deviceName}" ${editorValues.enabled ? 'checked' : ''}>
                       <span class="toggle-slider"></span>
                     </label>
                   </div>
                   
-                  <div class="editor-row">
+                  <div class="editor-row ${timeDisabledClass}">
                     <label>Start</label>
-                    <input type="time" class="editor-input" data-field="startTime" value="${this._editorValues.startTime}">
+                    <input type="time" class="editor-input" data-field="startTime" data-device="${sensor.deviceName}" value="${editorValues.startTime}" ${timeDisabled}>
                   </div>
                   
-                  <div class="editor-row">
+                  <div class="editor-row ${timeDisabledClass}">
                     <label>End</label>
-                    <input type="time" class="editor-input" data-field="endTime" value="${this._editorValues.endTime}">
+                    <input type="time" class="editor-input" data-field="endTime" data-device="${sensor.deviceName}" value="${editorValues.endTime}" ${timeDisabled}>
                   </div>
                   
                   <div class="editor-row">
                     <label>Work (sec)</label>
-                    <input type="number" class="editor-input" data-field="workSec" value="${this._editorValues.workSec}" min="1" max="999">
+                    <input type="number" class="editor-input" data-field="workSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999">
                   </div>
                   
                   <div class="editor-row">
                     <label>Pause (sec)</label>
-                    <input type="number" class="editor-input" data-field="pauseSec" value="${this._editorValues.pauseSec}" min="1" max="9999">
+                    <input type="number" class="editor-input" data-field="pauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999">
                   </div>
                   
                   <div class="editor-row">
                     <label>Level</label>
-                    <select class="editor-input" data-field="level">
-                      <option value="A" ${this._editorValues.level === 'A' ? 'selected' : ''}>A (Light)</option>
-                      <option value="B" ${this._editorValues.level === 'B' ? 'selected' : ''}>B (Medium)</option>
-                      <option value="C" ${this._editorValues.level === 'C' ? 'selected' : ''}>C (Strong)</option>
+                    <select class="editor-input" data-field="level" data-device="${sensor.deviceName}">
+                      <option value="A" ${editorValues.level === 'A' ? 'selected' : ''}>A (Light)</option>
+                      <option value="B" ${editorValues.level === 'B' ? 'selected' : ''}>B (Medium)</option>
+                      <option value="C" ${editorValues.level === 'C' ? 'selected' : ''}>C (Strong)</option>
                     </select>
                   </div>
-                </div>
+                </div>`;
+              })()}
                 
-                <button class="save-btn ${selectionCount === 0 || this._isSaving ? 'disabled' : ''}" 
-                        data-action="save" data-device="${sensor.deviceName}">
-                  ${this._isSaving ? '⏳ Saving...' : '💾 Save to Aroma-Link'}
-                </button>
+                <div class="editor-buttons">
+                  <button class="push-btn ${selectionCount === 0 || this._isSaving ? 'disabled' : ''}" 
+                          data-action="save" data-device="${sensor.deviceName}">
+                    ${this._isSaving ? '⏳ Pushing...' : '↑ Push to Aroma-Link App'}
+                  </button>
+                  <button class="clear-schedule-btn ${selectionCount === 0 || this._isSaving ? 'disabled' : ''}" 
+                          data-action="clear-schedule" data-device="${sensor.deviceName}">
+                    🗑 Clear Selected
+                  </button>
+                </div>
               </div>
+
+              <!-- Copy Schedule Section -->
+              ${otherDevices.length > 0 ? `
+                <div class="copy-section">
+                  <div class="copy-title">📋 Copy Schedule From</div>
+                  <div class="copy-row">
+                    <select class="copy-select" data-device="${sensor.deviceName}">
+                      <option value="">Select a diffuser...</option>
+                      ${otherDevices.map(d => `
+                        <option value="${d.deviceName}">${d.friendlyName}</option>
+                      `).join('')}
+                    </select>
+                    <button class="copy-btn ${this._isSaving ? 'disabled' : ''}" 
+                            data-action="copy-schedule" data-device="${sensor.deviceName}">
+                      Copy
+                    </button>
+                  </div>
+                  <div class="copy-hint">Copies all 7 days × 5 programs from another diffuser</div>
+                </div>
+              ` : ''}
             </div>
             
           </div>
@@ -637,10 +1037,16 @@ class AromaLinkScheduleCard extends HTMLElement {
     }
 
     this.shadowRoot.innerHTML = html;
-    this._attachEventListeners(sensors[0]);
+    this._attachEventListeners(sensors);
   }
 
-  _attachEventListeners(sensor) {
+  _attachEventListeners(sensors) {
+    // Create a lookup for sensors by deviceName
+    const sensorLookup = {};
+    for (const s of sensors) {
+      sensorLookup[s.deviceName] = s;
+    }
+
     // Power toggle
     this.shadowRoot.querySelectorAll('[data-action="toggle-power"]').forEach(btn => {
       btn.addEventListener('click', () => this._toggleSwitch(btn.dataset.entity));
@@ -658,69 +1064,161 @@ class AromaLinkScheduleCard extends HTMLElement {
       });
     });
 
-    // Run button
-    this.shadowRoot.querySelectorAll('[data-action="run"]').forEach(btn => {
-      btn.addEventListener('click', () => this._pressButton(btn.dataset.entity));
+    // Timed run minutes input
+    this.shadowRoot.querySelectorAll('.timed-minutes-input').forEach(input => {
+      input.addEventListener('change', (e) => {
+        const deviceName = input.dataset.device;
+        const minutes = Math.max(1, Math.min(480, parseInt(e.target.value) || 30));
+        this._setTimedRunMinutes(deviceName, minutes);
+      });
     });
 
-    // Cell clicks
+    // Run Continuously button
+    this.shadowRoot.querySelectorAll('[data-action="run-continuous"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const deviceName = btn.dataset.device;
+        const sensor = sensorLookup[deviceName];
+        if (sensor) {
+          const controls = this._getControlEntities(deviceName);
+          this._runContinuously(deviceName, controls);
+        }
+      });
+    });
+
+    // Run Timed button
+    this.shadowRoot.querySelectorAll('[data-action="run-timed"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const deviceName = btn.dataset.device;
+        const sensor = sensorLookup[deviceName];
+        if (sensor) {
+          const controls = this._getControlEntities(deviceName);
+          const minutes = this._getTimedRunMinutes(deviceName);
+          this._startTimedRun(deviceName, controls, minutes);
+        }
+      });
+    });
+
+    // Cancel Timer button
+    this.shadowRoot.querySelectorAll('[data-action="cancel-timer"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const deviceName = btn.dataset.device;
+        const controls = this._getControlEntities(deviceName);
+        this._stopTimedRun(deviceName, controls);
+      });
+    });
+
+    // Cell clicks (per-device)
     this.shadowRoot.querySelectorAll('[data-action="toggle-cell"]').forEach(cell => {
       cell.addEventListener('click', () => {
         if (this._isSaving) return;
         const day = parseInt(cell.dataset.day);
         const program = parseInt(cell.dataset.program);
-        this._toggleCell(day, program);
+        const deviceName = cell.dataset.device;
+        const sensor = sensorLookup[deviceName];
+        this._toggleCell(deviceName, day, program, sensor);
       });
     });
 
-    // Program row clicks
+    // Program row clicks (per-device)
     this.shadowRoot.querySelectorAll('[data-action="select-row"]').forEach(row => {
       row.addEventListener('click', () => {
         if (this._isSaving) return;
         const program = parseInt(row.dataset.program);
-        this._selectProgramRow(program);
+        const deviceName = row.dataset.device;
+        this._selectProgramRow(deviceName, program);
       });
     });
 
-    // Select all
+    // Day column clicks (per-device)
+    this.shadowRoot.querySelectorAll('[data-action="select-day"]').forEach(header => {
+      header.addEventListener('click', () => {
+        if (this._isSaving) return;
+        const day = parseInt(header.dataset.day);
+        const deviceName = header.dataset.device;
+        this._selectDayColumn(deviceName, day);
+      });
+    });
+
+    // Select all (per-device)
     this.shadowRoot.querySelectorAll('[data-action="select-all"]').forEach(btn => {
       btn.addEventListener('click', () => {
         if (this._isSaving) return;
-        this._selectAll();
+        const deviceName = btn.dataset.device;
+        this._selectAll(deviceName);
       });
     });
 
-    // Clear selection
+    // Clear selection (per-device)
     this.shadowRoot.querySelectorAll('[data-action="clear-selection"]').forEach(btn => {
-      btn.addEventListener('click', () => this._clearSelection());
+      btn.addEventListener('click', () => {
+        const deviceName = btn.dataset.device;
+        this._clearSelection(deviceName);
+      });
     });
 
-    // Pull schedule
+    // Pull schedule (per-device)
     this.shadowRoot.querySelectorAll('[data-action="pull"]').forEach(btn => {
-      btn.addEventListener('click', () => this._pullSchedule(sensor));
+      btn.addEventListener('click', () => {
+        const deviceName = btn.dataset.device;
+        const sensor = sensorLookup[deviceName];
+        if (sensor) this._pullSchedule(sensor);
+      });
     });
 
-    // Editor field changes
+    // Editor field changes (per-device)
     this.shadowRoot.querySelectorAll('[data-field]').forEach(input => {
       const field = input.dataset.field;
+      const deviceName = input.dataset.device;
       const eventType = input.type === 'checkbox' ? 'change' : 'input';
       
       input.addEventListener(eventType, (e) => {
+        const editorValues = this._getEditorValues(deviceName);
         if (input.type === 'checkbox') {
-          this._editorValues[field] = e.target.checked;
+          editorValues[field] = e.target.checked;
         } else if (input.type === 'number') {
-          this._editorValues[field] = parseInt(e.target.value) || 0;
+          editorValues[field] = parseInt(e.target.value) || 0;
         } else {
-          this._editorValues[field] = e.target.value;
+          editorValues[field] = e.target.value;
         }
       });
     });
 
-    // Save button
+    // Save button (per-device)
     this.shadowRoot.querySelectorAll('[data-action="save"]').forEach(btn => {
       btn.addEventListener('click', () => {
         if (!btn.classList.contains('disabled')) {
-          this._saveSelectedCells(sensor);
+          const deviceName = btn.dataset.device;
+          const sensor = sensorLookup[deviceName];
+          if (sensor) this._saveSelectedCells(sensor);
+        }
+      });
+    });
+
+    // Clear schedule button (per-device)
+    this.shadowRoot.querySelectorAll('[data-action="clear-schedule"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!btn.classList.contains('disabled')) {
+          const deviceName = btn.dataset.device;
+          const sensor = sensorLookup[deviceName];
+          if (sensor) this._clearSelectedSchedules(sensor);
+        }
+      });
+    });
+
+    // Copy schedule (per-device)
+    this.shadowRoot.querySelectorAll('[data-action="copy-schedule"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (this._isSaving) return;
+        const targetDeviceName = btn.dataset.device;
+        const targetSensor = sensorLookup[targetDeviceName];
+        
+        // Find the selected source from the dropdown
+        const selectEl = this.shadowRoot.querySelector(`.copy-select[data-device="${targetDeviceName}"]`);
+        const sourceDeviceName = selectEl?.value;
+        const sourceSensor = sourceDeviceName ? sensorLookup[sourceDeviceName] : null;
+        
+        if (targetSensor) {
+          this._copyScheduleFrom(targetSensor, sourceSensor);
         }
       });
     });
@@ -865,19 +1363,172 @@ class AromaLinkScheduleCard extends HTMLElement {
         font-size: 0.7em;
         color: var(--color-text-secondary);
       }
-      
+
+      /* Controls layout */
+      .controls-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .settings-row {
+        padding: 10px 12px;
+        background: var(--color-surface);
+        border-radius: var(--radius-sm);
+      }
+
+      /* Run Section */
+      .run-section {
+        margin-top: 12px;
+        padding: 12px;
+        background: linear-gradient(135deg, rgba(3, 169, 244, 0.08), rgba(76, 175, 80, 0.08));
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(0,0,0,0.06);
+      }
+
+      .run-section-title {
+        font-size: 0.75em;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+      }
+
+      .run-buttons {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: stretch;
+      }
+
       .run-btn {
         padding: 12px 20px;
-        background: var(--color-primary);
-        color: white;
         border: none;
         border-radius: var(--radius-sm);
         font-weight: 600;
+        font-size: 0.85em;
         cursor: pointer;
         transition: all 150ms ease;
+        display: flex;
+        align-items: center;
+        gap: 6px;
       }
-      
+
+      .run-btn.continuous {
+        background: var(--color-success);
+        color: white;
+        flex: 1;
+        justify-content: center;
+      }
+
+      .run-btn.timed {
+        background: var(--color-primary);
+        color: white;
+      }
+
       .run-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      }
+
+      .run-btn:active {
+        transform: translateY(0);
+      }
+
+      .timed-run-group {
+        display: flex;
+        flex: 1;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .timed-input-group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background: white;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(0,0,0,0.12);
+      }
+
+      .timed-minutes-input {
+        width: 50px;
+        padding: 6px;
+        border: none;
+        font-size: 0.9em;
+        text-align: center;
+        background: transparent;
+      }
+
+      .timed-minutes-input:focus {
+        outline: none;
+      }
+
+      .timed-input-group .unit {
+        font-size: 0.75em;
+        color: var(--color-text-secondary);
+      }
+
+      /* Timer Display */
+      .timer-display {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px;
+        background: linear-gradient(135deg, rgba(255, 152, 0, 0.15), rgba(255, 87, 34, 0.15));
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-warning);
+      }
+
+      .timer-countdown {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .timer-icon {
+        font-size: 1.5em;
+        animation: pulse 1s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
+      .timer-time {
+        font-size: 1.8em;
+        font-weight: 700;
+        font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+        color: var(--color-warning);
+        letter-spacing: 1px;
+      }
+
+      .timer-label {
+        font-size: 0.75em;
+        color: var(--color-text-secondary);
+        font-weight: 500;
+      }
+
+      .cancel-timer-btn {
+        padding: 8px 16px;
+        background: var(--color-error);
+        color: white;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 0.8em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 150ms;
+      }
+
+      .cancel-timer-btn:hover {
+        background: #d32f2f;
         box-shadow: 0 2px 8px rgba(0,0,0,0.2);
       }
       
@@ -926,6 +1577,49 @@ class AromaLinkScheduleCard extends HTMLElement {
         background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.1);
         color: var(--color-primary);
       }
+
+      /* ===== LEGEND ===== */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 10px;
+        font-size: 0.7em;
+        color: var(--color-text-secondary);
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .legend-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        border: 1px solid rgba(0,0,0,0.1);
+      }
+
+      .legend-dot.enabled {
+        background: rgba(76, 175, 80, 0.3);
+        border-color: rgba(76, 175, 80, 0.5);
+      }
+
+      .legend-dot.has-settings {
+        background: rgba(158, 158, 158, 0.3);
+        border-color: rgba(158, 158, 158, 0.5);
+      }
+
+      .legend-dot.empty {
+        background: var(--color-surface);
+        border-color: rgba(0,0,0,0.1);
+      }
+
+      .legend-dot.selected {
+        background: rgba(3, 169, 244, 0.3);
+        border-color: var(--color-primary);
+      }
       
       /* ===== SCHEDULE GRID ===== */
       .schedule-grid {
@@ -940,11 +1634,11 @@ class AromaLinkScheduleCard extends HTMLElement {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 4px 2px;
+        padding: 6px 4px;
         border-radius: 6px;
-        font-size: 0.65em;
-        min-height: 48px;
+        min-height: clamp(52px, 8vw, 68px);
         transition: all 150ms ease;
+        text-align: center;
       }
       
       .grid-cell.header {
@@ -965,14 +1659,26 @@ class AromaLinkScheduleCard extends HTMLElement {
         background: transparent;
       }
       
-      .grid-cell.program-label {
+      .grid-cell.program-label,
+      .grid-cell.day-header {
         cursor: pointer;
         user-select: none;
       }
       
-      .grid-cell.program-label:hover {
+      .grid-cell.program-label:hover,
+      .grid-cell.day-header:hover {
         background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.15);
         color: var(--color-primary);
+      }
+
+      .grid-cell.day-header.col-selected {
+        background: rgba(3, 169, 244, 0.2);
+        color: var(--color-primary);
+        box-shadow: inset 0 0 0 2px var(--color-primary);
+      }
+
+      .grid-cell.day-header.today.col-selected {
+        background: rgba(255, 152, 0, 0.4);
       }
       
       .grid-cell.program-label.row-selected {
@@ -988,8 +1694,14 @@ class AromaLinkScheduleCard extends HTMLElement {
         border: 2px solid transparent;
       }
       
-      .schedule-cell.disabled {
+      .schedule-cell.empty {
         background: var(--color-surface);
+        color: var(--color-text-secondary);
+      }
+
+      .schedule-cell.has-settings {
+        background: rgba(158, 158, 158, 0.2);
+        border-color: rgba(158, 158, 158, 0.4);
         color: var(--color-text-secondary);
       }
       
@@ -1006,6 +1718,10 @@ class AromaLinkScheduleCard extends HTMLElement {
       .schedule-cell.today-col.enabled {
         background: rgba(76, 175, 80, 0.2);
       }
+
+      .schedule-cell.today-col.has-settings {
+        background: rgba(158, 158, 158, 0.25);
+      }
       
       .schedule-cell.selected {
         background: rgba(3, 169, 244, 0.2) !important;
@@ -1019,20 +1735,27 @@ class AromaLinkScheduleCard extends HTMLElement {
         z-index: 1;
       }
       
-      .schedule-cell .time {
-        font-weight: 600;
-        line-height: 1.3;
+      .schedule-cell .cell-time {
+        font-weight: 700;
+        font-size: clamp(0.65rem, 1.8vw, 0.85rem);
+        line-height: 1.2;
+        white-space: nowrap;
+        letter-spacing: -0.3px;
       }
       
-      .schedule-cell .meta {
-        font-size: 0.85em;
-        opacity: 0.7;
+      .schedule-cell .cell-meta {
+        font-size: clamp(0.55rem, 1.5vw, 0.75rem);
+        opacity: 0.75;
         margin-top: 2px;
+        font-weight: 500;
+        white-space: nowrap;
       }
       
       .schedule-cell .off-label {
-        font-weight: 500;
+        font-weight: 600;
+        font-size: clamp(0.6rem, 1.6vw, 0.8rem);
         opacity: 0.5;
+        text-transform: uppercase;
       }
       
       /* ===== STATUS MESSAGE ===== */
@@ -1077,6 +1800,27 @@ class AromaLinkScheduleCard extends HTMLElement {
         font-weight: 600;
         margin-bottom: 12px;
         font-size: 0.9em;
+      }
+
+      .time-warning {
+        background: rgba(255, 152, 0, 0.15);
+        border: 1px solid var(--color-warning);
+        border-radius: var(--radius-sm);
+        padding: 8px 12px;
+        margin-bottom: 12px;
+        font-size: 0.75em;
+        color: #e65100;
+        line-height: 1.4;
+      }
+
+      .editor-row.time-disabled {
+        opacity: 0.4;
+        pointer-events: none;
+      }
+
+      .editor-row.time-disabled input {
+        background: rgba(0,0,0,0.05);
+        cursor: not-allowed;
       }
       
       .editor-grid {
@@ -1160,27 +1904,117 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       /* Save button */
-      .save-btn {
-        width: 100%;
-        padding: 12px;
-        background: var(--color-success);
-        color: white;
+      .editor-buttons {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+
+      .push-btn, .clear-schedule-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
         border: none;
-        border-radius: var(--radius-sm);
-        font-size: 0.9em;
+        border-radius: 20px;
+        font-size: 0.8em;
         font-weight: 600;
         cursor: pointer;
         transition: all 150ms;
       }
-      
-      .save-btn:hover:not(.disabled) {
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+
+      .push-btn {
+        background: var(--color-success);
+        color: white;
       }
       
-      .save-btn.disabled {
+      .push-btn:hover:not(.disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 3px 10px rgba(76, 175, 80, 0.3);
+      }
+
+      .clear-schedule-btn {
+        background: var(--color-error);
+        color: white;
+      }
+      
+      .clear-schedule-btn:hover:not(.disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 3px 10px rgba(244, 67, 54, 0.3);
+      }
+      
+      .push-btn.disabled, .clear-schedule-btn.disabled {
         background: rgba(0,0,0,0.12);
         color: var(--color-text-secondary);
         cursor: not-allowed;
+      }
+
+      /* ===== COPY SECTION ===== */
+      .copy-section {
+        margin-top: var(--spacing);
+        padding-top: var(--spacing);
+        border-top: 1px dashed rgba(0,0,0,0.12);
+      }
+
+      .copy-title {
+        font-size: 0.85em;
+        font-weight: 600;
+        color: var(--color-text);
+        margin-bottom: 8px;
+      }
+
+      .copy-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .copy-select {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid rgba(0,0,0,0.12);
+        border-radius: var(--radius-sm);
+        background: var(--color-bg);
+        font-size: 0.9em;
+        color: var(--color-text);
+        cursor: pointer;
+      }
+
+      .copy-select:focus {
+        outline: none;
+        border-color: var(--color-primary);
+      }
+
+      .copy-btn {
+        padding: 10px 18px;
+        background: var(--color-primary);
+        color: white;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 0.85em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 150ms;
+        white-space: nowrap;
+      }
+
+      .copy-btn:hover:not(.disabled) {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        transform: scale(1.02);
+      }
+
+      .copy-btn.disabled {
+        background: rgba(0,0,0,0.12);
+        color: var(--color-text-secondary);
+        cursor: not-allowed;
+      }
+
+      .copy-hint {
+        font-size: 0.7em;
+        color: var(--color-text-secondary);
+        margin-top: 6px;
+        font-style: italic;
       }
     `;
   }
@@ -1248,7 +2082,7 @@ window.customCards.push({
   documentationURL: 'https://github.com/cjam28/ha_aromalink'
 });
 
-console.info('%c AROMA-LINK-SCHEDULE-CARD %c v1.7.0 ', 
+console.info('%c AROMA-LINK-SCHEDULE-CARD %c v1.9.0 ', 
   'color: white; background: #03a9f4; font-weight: bold;',
   'color: #03a9f4; background: white; font-weight: bold;'
 );
