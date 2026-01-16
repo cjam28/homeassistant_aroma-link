@@ -41,7 +41,6 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._reauth_entry = None
         self._show_ssl_option = False
         self._ssl_error = False
-        self._show_ssl_fallback_option = False
         
     async def async_step_user(self, user_input=None):
         """Handle the initial step - username and password."""
@@ -51,9 +50,7 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             username = user_input[CONF_USERNAME]
             password = user_input[CONF_PASSWORD]
             verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
-            allow_ssl_fallback = user_input.get(
-                CONF_ALLOW_SSL_FALLBACK, DEFAULT_ALLOW_SSL_FALLBACK
-            )
+            allow_ssl_fallback = user_input.get(CONF_ALLOW_SSL_FALLBACK, DEFAULT_ALLOW_SSL_FALLBACK)
             
             _LOGGER.debug(f"Setting up with username: {username}")
             
@@ -99,7 +96,6 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 if error == "ssl_error" and verify_ssl:
                     self._show_ssl_option = True
-                    self._show_ssl_fallback_option = True
                     self._ssl_error = True
                     errors["base"] = "ssl_error"
                 else:
@@ -113,13 +109,12 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._show_ssl_option:
             default_verify = False if self._ssl_error else DEFAULT_VERIFY_SSL
             schema_fields[vol.Optional(CONF_VERIFY_SSL, default=default_verify)] = bool
-        if self._show_ssl_fallback_option:
-            schema_fields[
-                vol.Optional(
-                    CONF_ALLOW_SSL_FALLBACK,
-                    default=DEFAULT_ALLOW_SSL_FALLBACK,
-                )
-            ] = bool
+        schema_fields[
+            vol.Optional(
+                CONF_ALLOW_SSL_FALLBACK,
+                default=DEFAULT_ALLOW_SSL_FALLBACK,
+            )
+        ] = bool
 
         return self.async_show_form(
             step_id="user",

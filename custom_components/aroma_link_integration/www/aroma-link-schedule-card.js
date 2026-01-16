@@ -35,6 +35,9 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     // Oil panel open state per device
     this._oilPanelOpenByDevice = new Map();
+
+    // Local oil input values to prevent reset while typing
+    this._oilInputValuesByDevice = new Map();
   }
 
   _getTimedRunHours(deviceName) {
@@ -48,6 +51,26 @@ class AromaLinkScheduleCard extends HTMLElement {
     this._timedRunHoursByDevice.set(deviceName, hours);
   }
 
+  _getOilInputValues(deviceName) {
+    if (!this._oilInputValuesByDevice.has(deviceName)) {
+      this._oilInputValuesByDevice.set(deviceName, {});
+    }
+    return this._oilInputValuesByDevice.get(deviceName);
+  }
+
+  _setOilInputValue(deviceName, field, value) {
+    const values = this._getOilInputValues(deviceName);
+    values[field] = value;
+  }
+
+  _readOilInputValue(deviceName, field, fallbackValue) {
+    const values = this._getOilInputValues(deviceName);
+    if (values[field] !== undefined && values[field] !== null && values[field] !== '') {
+      return values[field];
+    }
+    return fallbackValue;
+  }
+
   _getOilPanelOpen(deviceName) {
     if (!this._oilPanelOpenByDevice.has(deviceName)) {
       this._oilPanelOpenByDevice.set(deviceName, false);
@@ -57,6 +80,69 @@ class AromaLinkScheduleCard extends HTMLElement {
 
   _setOilPanelOpen(deviceName, isOpen) {
     this._oilPanelOpenByDevice.set(deviceName, isOpen);
+  }
+
+  _recalculateManualFields(deviceName, changedField) {
+    const values = this._getOilInputValues(deviceName);
+    const read = (key) => parseFloat(values[key]) || 0;
+    const set = (key, val) => {
+      if (val === null || val === undefined || isNaN(val)) return;
+      values[key] = val.toFixed(key === 'manualRate' ? 2 : 1);
+      const input = this.shadowRoot.querySelector(`.oil-input[data-device="${deviceName}"][data-oil="${key}"]`);
+      if (input) input.value = values[key];
+    };
+
+    const start = read('manualStart');
+    const end = read('manualEnd');
+    const runtime = read('manualRuntime');
+    const rate = read('manualRate');
+
+    // If rate is missing and we have start/end/runtime, calculate rate
+    if (changedField !== 'manualRate' && start > 0 && end >= 0 && runtime > 0 && start > end) {
+      const calcRate = (start - end) / runtime;
+      if (calcRate > 0) set('manualRate', calcRate);
+      return;
+    }
+
+    // If rate is provided, calculate missing runtime or end volume
+    if (changedField === 'manualRate' && rate > 0) {
+      if (start > 0 && runtime > 0 && end <= 0) {
+        const calcEnd = Math.max(0, start - (rate * runtime));
+        set('manualEnd', calcEnd);
+      } else if (start > 0 && end >= 0 && end < start && runtime <= 0) {
+        const calcRuntime = (start - end) / rate;
+        set('manualRuntime', calcRuntime);
+      }
+    }
+  }
+
+  async _syncManualInputs(deviceName) {
+    const values = this._getOilInputValues(deviceName);
+    const mappings = {
+      manualStart: `number.${deviceName}_oil_manual_start_volume`,
+      manualEnd: `number.${deviceName}_oil_manual_end_volume`,
+      manualRuntime: `number.${deviceName}_oil_manual_runtime_hours`,
+      manualRate: `number.${deviceName}_oil_manual_rate`,
+    };
+
+    const calls = [];
+    for (const [field, entityId] of Object.entries(mappings)) {
+      if (!this._hass.states[entityId]) continue;
+      const raw = values[field];
+      if (raw === undefined || raw === null || raw === '') continue;
+      const num = parseFloat(raw);
+      if (isNaN(num)) continue;
+      calls.push(
+        this._hass.callService('number', 'set_value', {
+          entity_id: entityId,
+          value: num
+        })
+      );
+    }
+
+    if (calls.length) {
+      await Promise.all(calls);
+    }
   }
 
   _getTimerState(deviceName) {
@@ -798,14 +884,28 @@ class AromaLinkScheduleCard extends HTMLElement {
     const fallbackCalState = oilRemainingState?.attributes?.calibration_state || (oilRemainingState?.attributes?.calibrated ? 'Calibrated' : 'Idle');
     const calibrationState = calibrationStateEntity?.state || fallbackCalState;
     const isCalibrated = oilRemainingState?.attributes?.calibrated || false;
-    const bottleCapacity = parseFloat(capacityState?.state) || 100;
-    const fillVolume = parseFloat(fillVolumeState?.state) || 100;
-    const measuredRemaining = parseFloat(measuredState?.state) || 0;
-    const fillDate = fillDateState?.state || '';
-    const manualStart = parseFloat(manualStartState?.state) || 0;
-    const manualEnd = parseFloat(manualEndState?.state) || 0;
-    const manualRuntime = parseFloat(manualRuntimeState?.state) || 0;
-    const manualRate = parseFloat(manualRateState?.state) || 0;
+    const bottleCapacity = parseFloat(
+      this._readOilInputValue(sensor.deviceName, 'bottleCapacity', capacityState?.state)
+    ) || 100;
+    const fillVolume = parseFloat(
+      this._readOilInputValue(sensor.deviceName, 'fillVolume', fillVolumeState?.state)
+    ) || 100;
+    const measuredRemaining = parseFloat(
+      this._readOilInputValue(sensor.deviceName, 'measuredRemaining', measuredState?.state)
+    ) || 0;
+    const fillDate = this._readOilInputValue(sensor.deviceName, 'fillDate', fillDateState?.state || '') || '';
+    const manualStart = parseFloat(
+      this._readOilInputValue(sensor.deviceName, 'manualStart', manualStartState?.state)
+    ) || 0;
+    const manualEnd = parseFloat(
+      this._readOilInputValue(sensor.deviceName, 'manualEnd', manualEndState?.state)
+    ) || 0;
+    const manualRuntime = parseFloat(
+      this._readOilInputValue(sensor.deviceName, 'manualRuntime', manualRuntimeState?.state)
+    ) || 0;
+    const manualRate = parseFloat(
+      this._readOilInputValue(sensor.deviceName, 'manualRate', manualRateState?.state)
+    ) || 0;
     
     // Runtime info
     const formattedRuntime = runtimeState?.attributes?.formatted_runtime || '0h 0m 0s';
@@ -853,6 +953,8 @@ class AromaLinkScheduleCard extends HTMLElement {
       && consumed >= minConsumed
       && consumed > 0
       && runtimeHours > 0;
+
+    const canManualApply = manualRate > 0 || (manualStart > 0 && manualEnd >= 0 && manualRuntime > 0 && manualStart > manualEnd);
 
     const measuredDisabled = calibrationState !== 'Ready to Finalize';
     const calibrationBadge = calibrationState === 'Running'
@@ -1008,7 +1110,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     </div>
                   </div>
                   <div class="calibration-actions secondary">
-                    <button class="oil-btn small-btn" data-action="oil-manual-apply" data-device="${sensor.deviceName}">
+                    <button class="oil-btn small-btn ${canManualApply ? '' : 'disabled'}" data-action="oil-manual-apply" data-device="${sensor.deviceName}">
                       Apply Manual Override
                     </button>
                   </div>
@@ -1534,6 +1636,18 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     // OIL TRACKING EVENT LISTENERS
     this.shadowRoot.querySelectorAll('.oil-input').forEach(input => {
+      input.addEventListener('input', (e) => {
+        const deviceName = input.dataset.device;
+        const field = input.dataset.oil;
+        const rawValue = e.target.value;
+        this._setOilInputValue(deviceName, field, rawValue);
+
+        // Manual override auto-calc
+        if (field.startsWith('manual')) {
+          this._recalculateManualFields(deviceName, field);
+        }
+      });
+
       input.addEventListener('change', async (e) => {
         const deviceName = input.dataset.device;
         const field = input.dataset.oil;
@@ -1618,6 +1732,9 @@ class AromaLinkScheduleCard extends HTMLElement {
         const deviceName = btn.dataset.device;
         const manualButton = `button.${deviceName}_oil_manual_override`;
         
+        if (btn.classList.contains('disabled')) return;
+        await this._syncManualInputs(deviceName);
+
         if (this._hass.states[manualButton]) {
           await this._hass.callService('button', 'press', {
             entity_id: manualButton
@@ -1779,6 +1896,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         align-items: flex-end;
         gap: 6px;
         margin-left: auto;
+        flex: 1;
       }
 
       .run-panel {
@@ -1786,6 +1904,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         flex-direction: column;
         align-items: center;
         gap: 6px;
+        width: 100%;
       }
 
       .run-header {
@@ -1795,12 +1914,16 @@ class AromaLinkScheduleCard extends HTMLElement {
         border: 1px solid rgba(0,0,0,0.1);
         border-radius: 12px;
         background: rgba(0,0,0,0.04);
+        width: 100%;
+        text-align: center;
       }
 
       .run-buttons {
         display: flex;
         align-items: center;
         gap: 8px;
+        width: 100%;
+        justify-content: flex-end;
       }
 
       .timed-box {
@@ -2000,11 +2123,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .grid-cell.header {
         background: var(--color-surface);
-        color: #000;
+        color: var(--primary-text-color);
         font-weight: 600;
         font-size: 0.8em;
         min-height: 22px;
         text-transform: none;
+        text-shadow: 0 1px 1px rgba(0,0,0,0.1);
       }
       
       .grid-cell.header.today {
@@ -2025,13 +2149,13 @@ class AromaLinkScheduleCard extends HTMLElement {
       .grid-cell.program-label:hover,
       .grid-cell.day-header:hover {
         background: rgba(3, 169, 244, 0.15);
-        color: #000;
+        color: var(--primary-text-color);
       }
       
       .grid-cell.row-selected,
       .grid-cell.col-selected {
         background: rgba(3, 169, 244, 0.2);
-        color: #000;
+        color: var(--primary-text-color);
       }
       
       .schedule-cell {
@@ -2078,15 +2202,17 @@ class AromaLinkScheduleCard extends HTMLElement {
         font-size: clamp(0.7rem, 1.9vw, 0.9rem);
         line-height: 1.1;
         white-space: nowrap;
-        color: #000;
+        color: var(--primary-text-color);
+        text-shadow: 0 1px 1px rgba(0,0,0,0.12);
       }
       
       .schedule-cell .cell-meta {
         font-size: clamp(0.65rem, 1.7vw, 0.8rem);
         font-weight: 600;
         opacity: 1;
-        color: #000;
+        color: var(--primary-text-color);
         white-space: nowrap;
+        text-shadow: 0 1px 1px rgba(0,0,0,0.12);
       }
       
       .schedule-cell .off-label {
@@ -2490,13 +2616,16 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .calibration-content {
         padding: 12px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 12px;
       }
       
       .calibration-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 8px;
+        margin-bottom: 0;
         font-size: 0.8em;
       }
       
@@ -2533,10 +2662,12 @@ class AromaLinkScheduleCard extends HTMLElement {
         display: flex;
         gap: 8px;
         margin-top: 12px;
+        grid-column: 1 / -1;
       }
 
       .calibration-actions.secondary {
-        margin-top: 8px;
+        margin-top: 4px;
+        grid-column: 1 / -1;
       }
       
       .oil-btn {
@@ -2591,12 +2722,14 @@ class AromaLinkScheduleCard extends HTMLElement {
         border-radius: 6px;
         font-size: 0.72em;
         color: #e65100;
+        grid-column: 1 / -1;
       }
 
       .manual-override {
         margin-top: 12px;
         padding-top: 10px;
         border-top: 1px dashed rgba(0,0,0,0.15);
+        grid-column: 1 / -1;
       }
 
       .manual-title {

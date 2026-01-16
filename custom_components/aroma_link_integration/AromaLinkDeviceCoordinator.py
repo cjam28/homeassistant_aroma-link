@@ -64,6 +64,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             "fill_volume": 100,  # Volume at last fill in ml
             "measured_remaining": 0,  # User-measured remaining (for calibration)
             "usage_rate": None,  # ml per work-second (calculated)
+            "calibrated": False,  # Backward compatible flag
             "calibration_runtime": 0,  # Runtime at calibration point
             "fill_date": None,  # YYYY-MM-DD
             "calibration_state": "Idle",  # Idle, Running, Ready to Finalize, Calibrated
@@ -399,6 +400,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
 
         self.reset_oil_tracking()
         self._oil_calibration["calibration_state"] = "Running"
+        self._oil_calibration["calibrated"] = False
         self._oil_calibration["measured_remaining"] = 0
 
         # Update fill date to today
@@ -438,8 +440,10 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
         # Preserve usage rate if it exists
         if self._oil_calibration.get("usage_rate"):
             self._oil_calibration["calibration_state"] = "Calibrated"
+            self._oil_calibration["calibrated"] = True
         else:
             self._oil_calibration["calibration_state"] = "Idle"
+            self._oil_calibration["calibrated"] = False
 
         # Reset runtime tracking
         self._oil_tracking_active = True
@@ -506,6 +510,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
         self._oil_calibration["calibrated"] = True
         self._oil_calibration["calibration_runtime"] = runtime
         self._oil_calibration["calibration_state"] = "Calibrated"
+        self._oil_calibration["calibration_method"] = "measured"
         self._oil_tracking_active = True
 
         self._log_oil_event("CAL_FINAL", f"Calibration finalized: {usage_rate:.6f} ml/sec")
@@ -550,7 +555,8 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
 
         self._oil_calibration["usage_rate"] = usage_rate
         self._oil_calibration["calibration_state"] = "Calibrated"
-        self._oil_calibration["calibration_method"] = "manual"
+        self._oil_calibration["calibration_method"] = "manual" if method else "measured"
+        self._oil_calibration["calibrated"] = True
         self._oil_calibration["calibration_runtime"] = self._accumulated_work_seconds
         self._log_oil_event("CAL_MANUAL", f"Manual override applied ({method}).")
         self._request_oil_state_save()
