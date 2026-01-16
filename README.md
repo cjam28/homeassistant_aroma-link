@@ -1,6 +1,9 @@
-# Aroma-Link Integration for Home Assistant
+# Aroma-Link Integration for Home Assistant (SSL Bypass Fork)
 
 This custom component provides integration with Aroma-Link WiFi diffusers in Home Assistant.
+
+> **⚠️ IMPORTANT: SSL Verification Disabled**  
+> This fork disables SSL certificate verification to work around Aroma-Link's expired SSL certificates. While HTTPS encryption is still used, certificate validation is bypassed. This means the connection is encrypted but not authenticated, which could make you vulnerable to man-in-the-middle attacks. Use at your own risk.
 
 > **Note:** The integration appears in Home Assistant as "Aroma-Link Integration" with the domain `aroma_link_integration`
 
@@ -25,7 +28,7 @@ This custom component provides integration with Aroma-Link WiFi diffusers in Hom
 
 4. Click **Custom repositories**
 
-5. Paste the github repository url `https://github.com/Memberapple/ha_aromalink`
+5. Paste the github repository url `https://github.com/cjam28/ha_aromalink`
 
 6. Select **integration** as the type then click **ADD**
 
@@ -72,7 +75,7 @@ Parameters:
 - `week_days`: Days of the week to apply the schedule (optional, defaults to all days)
 - `device_id`: The ID of the device to control (optional, required if you have multiple devices)
 
-### `aroma_link_new.run_diffuser`
+### `aroma_link_integration.run_diffuser`
 
 Run the diffuser for a specific time.
 
@@ -111,7 +114,8 @@ The new auto-discovery feature eliminates the need to manually find your device 
 ### Technical Details
 
 - The integration uses the same API as the official Aroma-Link website
-- All communication is done securely over HTTPS
+- All communication is done over HTTPS (encrypted but SSL certificate verification is disabled)
+- **SSL Verification Bypass**: This fork sets `VERIFY_SSL = False` to bypass certificate validation, allowing the integration to work even when Aroma-Link's SSL certificates are expired or invalid
 - Session management is handled with cookies and automatic re-login when needed
 - The integration checks device status every minute by default
 
@@ -135,8 +139,12 @@ A: You don't need to! The integration automatically discovers your devices and l
 
 ## Version History
 
-- 1.1.0: Updated to support HACS integration
-- 1.0.0: Initial release with automatic device discovery
+- **1.1.1** (This fork): Added SSL verification bypass to work around expired SSL certificates
+  - Added `VERIFY_SSL = False` constant to disable SSL certificate verification
+  - Updated all aiohttp requests to use `ssl=VERIFY_SSL` parameter
+  - Allows integration to work even when Aroma-Link's SSL certificates are expired
+- 1.1.0: Updated to support HACS integration (from [DalyMauldin's fork](https://github.com/DalyMauldin/ha_aromalink))
+- 1.0.0: Initial release with automatic device discovery (from [Memberapple's original](https://github.com/Memberapple/ha_aromalink))
 
 ## Requirements
 
@@ -151,9 +159,18 @@ This integration is provided as-is with no warranties.
 
 ## Credits
 
+This is a fork of the Aroma-Link integration with SSL verification bypass added to work around expired SSL certificates.
+
+**Fork Chain:**
+- Original: [Memberapple/ha_aromalink](https://github.com/Memberapple/ha_aromalink)
+- Intermediate: [DalyMauldin/ha_aromalink](https://github.com/DalyMauldin/ha_aromalink)
+- This fork: [cjam28/ha_aromalink](https://github.com/cjam28/ha_aromalink)
+
 Developed for Home Assistant community use.
 
 ## Links
 
-- [Documentation](https://github.com/Memberapple/ha_aromalink/blob/master/README.md)
-- [Issue Tracker](https://github.com/Memberapple/ha_aromalink/issues)
+- [Documentation](https://github.com/cjam28/ha_aromalink#readme)
+- [Issue Tracker](https://github.com/cjam28/ha_aromalink/issues)
+- [Original Repository](https://github.com/Memberapple/ha_aromalink)
+- [DalyMauldin's Fork](https://github.com/DalyMauldin/ha_aromalink)
