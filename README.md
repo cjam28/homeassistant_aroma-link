@@ -237,6 +237,18 @@ cards:
   - type: custom:mushroom-entity-card
     entity: button.aromalink_device_name_save_program
     name: Save Program
+  - type: custom:mushroom-template-card
+    primary: API Diagnostics (Device Info)
+    secondary: Tap to call /device/deviceInfo/now for this device
+    icon: mdi:bug-outline
+    tap_action:
+      action: call-service
+      service: aroma_link_integration.api_diagnostics
+      data:
+        device_id: "419933"
+        path: "/device/deviceInfo/now/{device_id}"
+        params:
+          timeout: 1000
 ```
 
 ## Workset Scheduling
