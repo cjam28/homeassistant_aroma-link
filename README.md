@@ -132,11 +132,18 @@ The integration supports full workset scheduling with up to 5 time programs per 
 
 ### Setting Up Workset Controls
 
-To use workset scheduling, you'll need to create helper entities in Home Assistant. Here's how:
+**✨ Automatic Setup:** Helper entities are automatically created when you set up the integration! No manual configuration needed.
 
-#### Step 1: Create Helper Entities
+When you add the integration, it automatically creates:
+- **Helper entities** for all 5 programs (input_boolean, input_datetime, input_number, input_select)
+- **Day selector** helper (input_select) for choosing which day to load/save
+- **Dashboard YAML** configuration stored in the integration config entry
 
-For each device, create helper entities for 5 programs. You can do this via the UI (Settings → Devices & Services → Helpers) or use the following YAML configuration in your `configuration.yaml`:
+The helper prefix is automatically generated from your device name (e.g., "Pool House" becomes `aromalink_pool_house`).
+
+#### Manual Helper Creation (Optional)
+
+If you prefer to create helpers manually, or if automatic creation didn't work, you can create them via the UI (Settings → Devices & Services → Helpers) or use the following YAML configuration in your `configuration.yaml`:
 
 ```yaml
 # Example for a device named "Pool House"
@@ -294,11 +301,21 @@ input_select:
     initial: "A"
 ```
 
-**Note:** Replace `aromalink_poolhouse` with your device's prefix (use the device name, lowercased with spaces/ hyphens replaced by underscores).
+**Note:** The prefix is automatically generated from your device name (e.g., "Pool House" → `aromalink_pool_house`). You can also specify a custom prefix when calling the load/save services.
 
-#### Step 2: Create Mushroom Dashboard
+#### Step 2: Get Dashboard Configuration
 
-Here's a sample Lovelace dashboard configuration using Mushroom cards:
+The integration automatically generates a Lovelace dashboard configuration for each device. To retrieve it:
+
+1. **Via Service:** Call `aroma_link_integration_test.get_dashboard_config` service
+   - The YAML will be logged and stored in the integration config entry options
+   - Check Settings → Devices & Services → Aroma-Link Integration (Test) → Options to view it
+
+2. **Access from Config Entry:** The dashboard YAML is stored in the config entry options under `dashboard_yaml_{device_id}`
+
+**Example Dashboard YAML:**
+
+Here's the automatically generated Lovelace dashboard configuration using Mushroom cards:
 
 ```yaml
 type: vertical-stack
@@ -400,6 +417,14 @@ cards:
 ```
 
 #### Step 3: Using the Workset Controls
+
+**Quick Start:**
+1. After integration setup, helper entities are automatically available
+2. Retrieve the dashboard YAML via the `get_dashboard_config` service or from config entry options
+3. Copy the YAML into a new Lovelace card on your dashboard
+4. Use the Load/Save buttons in the dashboard to manage schedules
+
+**Detailed Usage:**
 
 1. **Load Schedule**: Call `aroma_link_integration.load_workset` service to fetch the current schedule from your device and populate the helper entities.
 2. **Edit Schedule**: Use the helper entities in your dashboard to modify the schedule (enable/disable programs, set times, durations, levels).
