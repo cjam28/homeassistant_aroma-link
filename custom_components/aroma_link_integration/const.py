@@ -19,7 +19,6 @@ SERVICE_SET_SCHEDULER = "set_scheduler"
 SERVICE_RUN_DIFFUSER = "run_diffuser"
 SERVICE_LOAD_WORKSET = "load_workset"
 SERVICE_SAVE_WORKSET = "save_workset"
-SERVICE_GET_DASHBOARD_CONFIG = "get_dashboard_config"
 
 # Attributes
 ATTR_DURATION = "duration"

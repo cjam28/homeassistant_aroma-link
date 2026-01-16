@@ -52,13 +52,3 @@ save_workset:
     helper_prefix:
       description: "Prefix for helper entity IDs (e.g., 'aromalink_poolhouse'). Automatically created during setup if not provided."
       example: "aromalink_poolhouse"
-
-get_dashboard_config:
-  description: "Generate and store Lovelace dashboard YAML configuration for workset controls. The YAML is logged and stored in the config entry options."
-  fields:
-    device_id:
-      description: "The ID of the device to generate dashboard config for. Required if multiple devices are available."
-      example: "419933"
-    helper_prefix:
-      description: "The prefix for helper entities (e.g., 'aromalink_poolhouse'). If not provided, will be auto-generated from device name."
-      example: "aromalink_poolhouse"

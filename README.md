@@ -111,7 +111,9 @@ Parameters:
 
 The integration adds the following entities for each device:
 
-- **Switch**: Control the power state of the diffuser (on/off)
+- **Switches**:
+  - Power: Control the power state of the diffuser (on/off)
+  - Fan: Control the fan state (on/off)
 - **Button**: Send immediate commands to the diffuser (Run and Save Settings buttons)
 - **Number**: Set work duration and pause duration values
 - **Sensors**:
@@ -120,6 +122,16 @@ The integration adds the following entities for each device:
   - Pause Remaining Time (seconds)
   - On Count (total activations)
   - Pump Count (total diffusions)
+- **Schedule Entities** (per-program editor):
+  - Program Selector: Choose which program (1-5) to edit
+  - Program Enabled: Enable/disable the selected program
+  - Program Start Time: Start time for the program
+  - Program End Time: End time for the program
+  - Program Work Duration: Work duration in seconds (5-900)
+  - Program Pause Duration: Pause duration in seconds (5-900)
+  - Program Level: Consistency level (A/B/C)
+  - Program Day Switches: 7 switches (one per day) to select which days to apply the program
+  - Save Program: Button to save the edited program to selected days
 
 ## Workset Scheduling
 
@@ -130,330 +142,27 @@ The integration supports full workset scheduling with up to 5 time programs per 
 - Consistency level (A, B, or C)
 - Enable/disable toggle
 
-### Setting Up Workset Controls
+### Using Schedule Entities
 
-**✨ Automatic Setup:** Helper entities are automatically created when you set up the integration! No manual configuration needed.
+**✨ Native Entities:** The integration automatically creates native Home Assistant entities for schedule editing. No manual setup required!
 
-When you add the integration, it automatically creates:
-- **Helper entities** for all 5 programs (input_boolean, input_datetime, input_number, input_select)
-- **Day selector** helper (input_select) for choosing which day to load/save
-- **Dashboard YAML** configuration stored in the integration config entry
+All schedule entities appear on your device page automatically. To edit a schedule:
 
-The helper prefix is automatically generated from your device name (e.g., "Pool House" becomes `aromalink_pool_house`).
+1. **Select a Program**: Use the "Program" selector to choose which program (1-5) you want to edit
+2. **Edit Program Settings**: Adjust the enabled state, start/end times, work/pause durations, and consistency level
+3. **Select Days**: Toggle the day switches (Monday-Sunday) to choose which days this program should apply to
+4. **Save**: Press the "Save Program" button to apply your changes
 
-#### Manual Helper Creation (Optional)
+The integration automatically:
+- Loads schedules on-demand when you view the device page
+- Merges your edited program into the full 5-program set for each selected day
+- Saves all changes to the device via the Aroma-Link API
 
-If you prefer to create helpers manually, or if automatic creation didn't work, you can create them via the UI (Settings → Devices & Services → Helpers) or use the following YAML configuration in your `configuration.yaml`:
+**Note:** Schedules are cached locally and only refreshed when needed. Changes made outside Home Assistant (via the app) will be reflected when you refresh the schedule or view the device page.
 
-```yaml
-# Example for a device named "Pool House"
-input_boolean:
-  aromalink_poolhouse_program_1_enabled:
-    name: "Pool House Program 1 Enabled"
-  aromalink_poolhouse_program_2_enabled:
-    name: "Pool House Program 2 Enabled"
-  aromalink_poolhouse_program_3_enabled:
-    name: "Pool House Program 3 Enabled"
-  aromalink_poolhouse_program_4_enabled:
-    name: "Pool House Program 4 Enabled"
-  aromalink_poolhouse_program_5_enabled:
-    name: "Pool House Program 5 Enabled"
+### Legacy Services (Backward Compatibility)
 
-input_datetime:
-  aromalink_poolhouse_program_1_start:
-    name: "Pool House Program 1 Start"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_1_end:
-    name: "Pool House Program 1 End"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_2_start:
-    name: "Pool House Program 2 Start"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_2_end:
-    name: "Pool House Program 2 End"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_3_start:
-    name: "Pool House Program 3 Start"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_3_end:
-    name: "Pool House Program 3 End"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_4_start:
-    name: "Pool House Program 4 Start"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_4_end:
-    name: "Pool House Program 4 End"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_5_start:
-    name: "Pool House Program 5 Start"
-    has_date: false
-    has_time: true
-  aromalink_poolhouse_program_5_end:
-    name: "Pool House Program 5 End"
-    has_date: false
-    has_time: true
-
-input_number:
-  aromalink_poolhouse_program_1_work:
-    name: "Pool House Program 1 Work (sec)"
-    min: 5
-    max: 900
-    step: 1
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_1_pause:
-    name: "Pool House Program 1 Pause (sec)"
-    min: 5
-    max: 900
-    step: 5
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_2_work:
-    name: "Pool House Program 2 Work (sec)"
-    min: 5
-    max: 900
-    step: 1
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_2_pause:
-    name: "Pool House Program 2 Pause (sec)"
-    min: 5
-    max: 900
-    step: 5
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_3_work:
-    name: "Pool House Program 3 Work (sec)"
-    min: 5
-    max: 900
-    step: 1
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_3_pause:
-    name: "Pool House Program 3 Pause (sec)"
-    min: 5
-    max: 900
-    step: 5
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_4_work:
-    name: "Pool House Program 4 Work (sec)"
-    min: 5
-    max: 900
-    step: 1
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_4_pause:
-    name: "Pool House Program 4 Pause (sec)"
-    min: 5
-    max: 900
-    step: 5
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_5_work:
-    name: "Pool House Program 5 Work (sec)"
-    min: 5
-    max: 900
-    step: 1
-    unit_of_measurement: "sec"
-  aromalink_poolhouse_program_5_pause:
-    name: "Pool House Program 5 Pause (sec)"
-    min: 5
-    max: 900
-    step: 5
-    unit_of_measurement: "sec"
-
-input_select:
-  aromalink_poolhouse_program_1_level:
-    name: "Pool House Program 1 Level"
-    options:
-      - "A"
-      - "B"
-      - "C"
-    initial: "A"
-  aromalink_poolhouse_program_2_level:
-    name: "Pool House Program 2 Level"
-    options:
-      - "A"
-      - "B"
-      - "C"
-    initial: "A"
-  aromalink_poolhouse_program_3_level:
-    name: "Pool House Program 3 Level"
-    options:
-      - "A"
-      - "B"
-      - "C"
-    initial: "A"
-  aromalink_poolhouse_program_4_level:
-    name: "Pool House Program 4 Level"
-    options:
-      - "A"
-      - "B"
-      - "C"
-    initial: "A"
-  aromalink_poolhouse_program_5_level:
-    name: "Pool House Program 5 Level"
-    options:
-      - "A"
-      - "B"
-      - "C"
-    initial: "A"
-```
-
-**Note:** The prefix is automatically generated from your device name (e.g., "Pool House" → `aromalink_pool_house`). You can also specify a custom prefix when calling the load/save services.
-
-#### Step 2: Get Dashboard Configuration
-
-The integration automatically generates a Lovelace dashboard configuration for each device. To retrieve it:
-
-1. **Via Service:** Call `aroma_link_integration_test.get_dashboard_config` service
-   - The YAML will be logged and stored in the integration config entry options
-   - Check Settings → Devices & Services → Aroma-Link Integration (Test) → Options to view it
-
-2. **Access from Config Entry:** The dashboard YAML is stored in the config entry options under `dashboard_yaml_{device_id}`
-
-**Example Dashboard YAML:**
-
-Here's the automatically generated Lovelace dashboard configuration using Mushroom cards:
-
-```yaml
-type: vertical-stack
-cards:
-  # Header
-  - type: custom:mushroom-title-card
-    title: Aroma-Link Workset Controls
-    subtitle: Pool House
-
-  # Day Selection
-  - type: custom:mushroom-chips-card
-    title: Select Days
-    chips:
-      - type: template
-        entity: input_select.aromalink_poolhouse_selected_day
-        icon: mdi:calendar
-        content: "{{ states('input_select.aromalink_poolhouse_selected_day') }}"
-  
-  # Load/Save Buttons
-  - type: horizontal-stack
-    cards:
-      - type: custom:mushroom-entity-card
-        entity: button.load_workset
-        tap_action:
-          action: call-service
-          service: aroma_link_integration.load_workset
-          service_data:
-            device_id: "419933"
-            week_day: 0
-            helper_prefix: "aromalink_poolhouse"
-        icon: mdi:download
-        name: Load from Device
-      - type: custom:mushroom-entity-card
-        entity: button.save_workset
-        tap_action:
-          action: call-service
-          service: aroma_link_integration.save_workset
-          service_data:
-            device_id: "419933"
-            week_days: [0, 1, 2, 3, 4, 5, 6]
-            helper_prefix: "aromalink_poolhouse"
-        icon: mdi:upload
-        name: Save to Device
-
-  # Program 1
-  - type: custom:mushroom-title-card
-    title: Program 1
-  - type: grid
-    square: false
-    columns: 2
-    cards:
-      - type: custom:mushroom-entity-card
-        entity: input_boolean.aromalink_poolhouse_program_1_enabled
-        name: Enabled
-      - type: custom:mushroom-entity-card
-        entity: input_select.aromalink_poolhouse_program_1_level
-        name: Level
-      - type: custom:mushroom-entity-card
-        entity: input_datetime.aromalink_poolhouse_program_1_start
-        name: Start Time
-      - type: custom:mushroom-entity-card
-        entity: input_datetime.aromalink_poolhouse_program_1_end
-        name: End Time
-      - type: custom:mushroom-entity-card
-        entity: input_number.aromalink_poolhouse_program_1_work
-        name: Work (sec)
-      - type: custom:mushroom-entity-card
-        entity: input_number.aromalink_poolhouse_program_1_pause
-        name: Pause (sec)
-
-  # Program 2
-  - type: custom:mushroom-title-card
-    title: Program 2
-  - type: grid
-    square: false
-    columns: 2
-    cards:
-      - type: custom:mushroom-entity-card
-        entity: input_boolean.aromalink_poolhouse_program_2_enabled
-        name: Enabled
-      - type: custom:mushroom-entity-card
-        entity: input_select.aromalink_poolhouse_program_2_level
-        name: Level
-      - type: custom:mushroom-entity-card
-        entity: input_datetime.aromalink_poolhouse_program_2_start
-        name: Start Time
-      - type: custom:mushroom-entity-card
-        entity: input_datetime.aromalink_poolhouse_program_2_end
-        name: End Time
-      - type: custom:mushroom-entity-card
-        entity: input_number.aromalink_poolhouse_program_2_work
-        name: Work (sec)
-      - type: custom:mushroom-entity-card
-        entity: input_number.aromalink_poolhouse_program_2_pause
-        name: Pause (sec)
-
-  # Programs 3-5 (similar structure)
-  # ... repeat for programs 3, 4, and 5
-```
-
-#### Step 3: Using the Workset Controls
-
-**Quick Start:**
-1. After integration setup, helper entities are automatically available
-2. Retrieve the dashboard YAML via the `get_dashboard_config` service or from config entry options
-3. Copy the YAML into a new Lovelace card on your dashboard
-4. Use the Load/Save buttons in the dashboard to manage schedules
-
-**Detailed Usage:**
-
-1. **Load Schedule**: Call `aroma_link_integration.load_workset` service to fetch the current schedule from your device and populate the helper entities.
-2. **Edit Schedule**: Use the helper entities in your dashboard to modify the schedule (enable/disable programs, set times, durations, levels).
-3. **Save Schedule**: Call `aroma_link_integration.save_workset` service to apply your changes to the device.
-
-**Example Automation:**
-
-```yaml
-automation:
-  - alias: "Load Aroma-Link Schedule on Startup"
-    trigger:
-      - platform: homeassistant
-        event: start
-    action:
-      - service: aroma_link_integration.load_workset
-        data:
-          device_id: "419933"
-          week_day: 0
-          helper_prefix: "aromalink_poolhouse"
-```
-
-**Day Mapping:**
-- 0 = Monday
-- 1 = Tuesday
-- 2 = Wednesday
-- 3 = Thursday
-- 4 = Friday
-- 5 = Saturday
-- 6 = Sunday
+The `load_workset` and `save_workset` services are still available for backward compatibility, but the native entities provide a better user experience. These services work with helper entities if you prefer that approach.
 
 ## How It Works
 
@@ -479,7 +188,7 @@ The new auto-discovery feature eliminates the need to manually find your device 
 - All communication is done over HTTPS (encrypted but SSL certificate verification is disabled)
 - **SSL Verification Bypass**: This fork sets `VERIFY_SSL = False` to bypass certificate validation, allowing the integration to work even when Aroma-Link's SSL certificates are expired or invalid
 - Session management is handled with cookies and automatic re-login when needed
-- **Important**: The integration polls the API every 1 minute to check for device state changes. This means any changes made outside of Home Assistant (e.g., via the Aroma-Link mobile app or website) will be reflected in Home Assistant within 1 minute
+- **Important**: The integration polls device state (power, fan, sensors) every 1 minute. Schedule data is loaded on-demand when viewing the device page or when explicitly refreshed. This means any changes made outside of Home Assistant (e.g., via the Aroma-Link mobile app or website) will be reflected in Home Assistant within 1 minute for device state, or immediately when you view/edit schedules.
 
 ## Troubleshooting
 
@@ -500,19 +209,25 @@ A: Make sure your diffuser is connected to WiFi and properly set up in the Aroma
 A: You don't need to! The integration automatically discovers your devices and lets you select which one to use from a list.
 
 **Q: What happens if I change settings in the Aroma-Link app?**  
-A: The integration polls the API every 1 minute, so changes made outside Home Assistant will be reflected within 1 minute. However, if you change work duration or pause duration in the app, you may need to update the Number entities in Home Assistant to match.
+A: The integration polls device state every 1 minute, so power/fan changes will be reflected within 1 minute. Schedule changes are loaded on-demand when you view the device page or refresh the schedule.
 
 **Q: Can I set different schedules for different days of the week?**  
-A: The API supports per-day scheduling (via the `week_days` parameter in `set_scheduler`), but the current implementation applies the same schedule to all specified days. Per-day scheduling could be added as a future enhancement.
+A: Yes! Each day (Monday-Sunday) has its own set of 5 programs. When you edit a program and save it, you can select which days to apply it to. The integration automatically merges your edited program into the full 5-program set for each selected day.
 
 ## Version History
 
+- **1.3.0** (This fork): Native schedule entities and fan control
+  - Replaced helper-based system with native Home Assistant entities
+  - Added fan switch entity for fan on/off control
+  - Per-program editor with program selector, editor fields, and day selection
+  - On-demand schedule polling (no automatic polling)
+  - Schedule caching for performance
+  - All entities appear automatically on device page
 - **1.2.0** (This fork): Added full workset scheduling support
   - Added `fetch_workset_for_day()` and `set_workset()` methods for reading/writing complete schedules
   - Added `load_workset` and `save_workset` services for helper-based schedule management
   - Support for up to 5 time programs per day with start/end times, work/pause durations, and consistency levels
   - Multi-day schedule support (apply same schedule to multiple days)
-  - Mushroom dashboard example and documentation
 - **1.1.1** (This fork): Added SSL verification bypass to work around expired SSL certificates
   - Added `VERIFY_SSL = False` constant to disable SSL certificate verification
   - Updated all aiohttp requests to use `ssl=VERIFY_SSL` parameter
