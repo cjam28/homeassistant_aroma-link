@@ -25,6 +25,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkOilCalibrationToggleButton(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkOilCalibrationFinalizeButton(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkOilRefillKeepCalibrationButton(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilManualOverrideButton(coordinator, entry, device_id, device_name))
     
     async_add_entities(entities)
 
@@ -401,4 +402,48 @@ class AromaLinkOilRefillKeepCalibrationButton(CoordinatorEntity, ButtonEntity):
         """Refill oil and keep calibration rate."""
         _LOGGER.info("Refill (keep calibration) pressed for %s", self.coordinator.device_id)
         self.coordinator.refill_keep_calibration()
+        self.coordinator.async_update_listeners()
+
+
+class AromaLinkOilManualOverrideButton(CoordinatorEntity, ButtonEntity):
+    """Button to apply manual calibration override."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Apply Manual Calibration"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_manual_override"
+        self._attr_icon = "mdi:tune-variant"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self.coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_press(self):
+        """Apply manual calibration override."""
+        _LOGGER.info("Apply manual calibration pressed for %s", self.coordinator.device_id)
+        usage_rate = self.coordinator.apply_manual_override()
+        if usage_rate:
+            _LOGGER.info(
+                "Manual override applied for %s: %.6f ml/sec (%.2f ml/hour)",
+                self.coordinator.device_id, usage_rate, usage_rate * 3600
+            )
+        else:
+            _LOGGER.warning("Manual override failed for %s", self.coordinator.device_id)
         self.coordinator.async_update_listeners()

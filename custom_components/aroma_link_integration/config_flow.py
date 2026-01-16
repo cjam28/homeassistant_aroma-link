@@ -5,6 +5,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import aiohttp
+import ssl
 
 from .const import (
     DOMAIN,
@@ -13,11 +14,14 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_POLL_INTERVAL,
     CONF_DEBUG_LOGGING,
+    CONF_VERIFY_SSL,
+    CONF_ALLOW_SSL_FALLBACK,
     DEFAULT_POLL_INTERVAL_SECONDS,
     MIN_POLL_INTERVAL_SECONDS,
     MAX_POLL_INTERVAL_SECONDS,
     DEFAULT_DEBUG_LOGGING,
-    VERIFY_SSL,
+    DEFAULT_VERIFY_SSL,
+    DEFAULT_ALLOW_SSL_FALLBACK,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +39,9 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._jsessionid = None
         self._devices = []
         self._reauth_entry = None
+        self._show_ssl_option = False
+        self._ssl_error = False
+        self._show_ssl_fallback_option = False
         
     async def async_step_user(self, user_input=None):
         """Handle the initial step - username and password."""
@@ -43,11 +50,17 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             username = user_input[CONF_USERNAME]
             password = user_input[CONF_PASSWORD]
+            verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+            allow_ssl_fallback = user_input.get(
+                CONF_ALLOW_SSL_FALLBACK, DEFAULT_ALLOW_SSL_FALLBACK
+            )
             
             _LOGGER.debug(f"Setting up with username: {username}")
             
             # Try to authenticate
-            session, jsessionid, devices = await self._authenticate(username, password)
+            session, jsessionid, devices, error = await self._authenticate(
+                username, password, verify_ssl=verify_ssl
+            )
             
             if jsessionid:
                 self._username = username
@@ -69,6 +82,8 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         data={
                             CONF_USERNAME: username,
                             CONF_PASSWORD: password,
+                            CONF_VERIFY_SSL: verify_ssl,
+                            CONF_ALLOW_SSL_FALLBACK: allow_ssl_fallback,
                             "devices": [
                                 {
                                     CONF_DEVICE_ID: str(device["deviceId"]),
@@ -82,17 +97,33 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     # No devices found, show an error
                     errors["base"] = "no_devices"
             else:
-                errors["base"] = "cannot_connect"
+                if error == "ssl_error" and verify_ssl:
+                    self._show_ssl_option = True
+                    self._show_ssl_fallback_option = True
+                    self._ssl_error = True
+                    errors["base"] = "ssl_error"
+                else:
+                    errors["base"] = "cannot_connect"
 
         # Show the initial form for username/password
+        schema_fields = {
+            vol.Required(CONF_USERNAME): str,
+            vol.Required(CONF_PASSWORD): str,
+        }
+        if self._show_ssl_option:
+            default_verify = False if self._ssl_error else DEFAULT_VERIFY_SSL
+            schema_fields[vol.Optional(CONF_VERIFY_SSL, default=default_verify)] = bool
+        if self._show_ssl_fallback_option:
+            schema_fields[
+                vol.Optional(
+                    CONF_ALLOW_SSL_FALLBACK,
+                    default=DEFAULT_ALLOW_SSL_FALLBACK,
+                )
+            ] = bool
+
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_USERNAME): str,
-                    vol.Required(CONF_PASSWORD): str,
-                }
-            ),
+            data_schema=vol.Schema(schema_fields),
             errors=errors,
         )
 
@@ -135,6 +166,22 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
                         vol.Range(min=MIN_POLL_INTERVAL_SECONDS, max=MAX_POLL_INTERVAL_SECONDS)
                     ),
                     vol.Optional(
+                        CONF_VERIFY_SSL,
+                        default=options.get(
+                            CONF_VERIFY_SSL,
+                            self._config_entry.data.get(CONF_VERIFY_SSL, False),
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ALLOW_SSL_FALLBACK,
+                        default=options.get(
+                            CONF_ALLOW_SSL_FALLBACK,
+                            self._config_entry.data.get(
+                                CONF_ALLOW_SSL_FALLBACK, DEFAULT_ALLOW_SSL_FALLBACK
+                            ),
+                        ),
+                    ): bool,
+                    vol.Optional(
                         CONF_DEBUG_LOGGING,
                         default=options.get(CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING),
                     ): bool,
@@ -146,7 +193,7 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
             },
         )
         
-    async def _authenticate(self, username, password):
+    async def _authenticate(self, username, password, verify_ssl=True):
         """Authenticate with Aroma-Link API and retrieve device list.
         
         Returns:
@@ -158,6 +205,7 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
         session = async_get_clientsession(self.hass)
         jsessionid = None
         devices = []
+        error = None
         
         login_url = "https://www.aroma-link.com/login"
         
@@ -178,16 +226,19 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
             # First, do an initial GET to establish cookies
             _LOGGER.debug("Attempting initial GET to aroma-link.com for cookies.")
             try:
-                async with session.get("https://www.aroma-link.com/", timeout=10, ssl=VERIFY_SSL) as initial_response:
+                async with session.get("https://www.aroma-link.com/", timeout=10, ssl=verify_ssl) as initial_response:
                     initial_response.raise_for_status()
                     _LOGGER.debug(f"Initial GET successful (status {initial_response.status}).")
+            except (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLCertVerificationError) as e:
+                _LOGGER.warning(f"SSL verification failed during initial GET: {e}")
+                return session, None, [], "ssl_error"
             except Exception as e:
                 _LOGGER.warning(f"Initial GET request failed, but continuing: {e}")
             
             # Now attempt login to get JSESSIONID
             _LOGGER.debug(f"Attempting login for {username}")
             
-            async with session.post(login_url, data=data, headers=headers, ssl=VERIFY_SSL) as response:
+            async with session.post(login_url, data=data, headers=headers, ssl=verify_ssl) as response:
                 _LOGGER.debug(f"Login response status: {response.status}")
                 
                 response_text = await response.text()
@@ -202,10 +253,10 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
                         
                         # Now fetch device list
                         _LOGGER.debug("Fetching device list")
-                        devices = await self._fetch_device_list(session, jsessionid)
+                        devices = await self._fetch_device_list(session, jsessionid, verify_ssl=verify_ssl)
                         
                         _LOGGER.info(f"Found {len(devices)} devices for {username}")
-                        return session, jsessionid, devices
+                        return session, jsessionid, devices, None
                     else:
                         _LOGGER.error("No JSESSIONID cookie found. Authentication failed.")
                         
@@ -226,6 +277,9 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
                                 _LOGGER.error("Could not parse error message from response")
                 else:
                     _LOGGER.error(f"Login failed with status code: {response.status}")
+        except (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLCertVerificationError) as e:
+            _LOGGER.warning(f"SSL verification failed during authentication: {e}")
+            error = "ssl_error"
         except aiohttp.ClientError as e:
             _LOGGER.error(f"Network error while authenticating: {e}")
         except json.JSONDecodeError as e:
@@ -233,7 +287,7 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
         except Exception as e:
             _LOGGER.error(f"Unexpected error during authentication: {e}", exc_info=True)
         
-        return session, None, []
+        return session, None, [], error
         
     async def _extract_jsessionid(self, session, response, response_text, username):
         """Extract JSESSIONID using multiple methods."""
@@ -271,7 +325,7 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
             
         return None
         
-    async def _fetch_device_list(self, session, jsessionid):
+    async def _fetch_device_list(self, session, jsessionid, verify_ssl=True):
         """Fetch the list of devices for the authenticated user."""
         language_code = "EN"
         device_list_url = "https://www.aroma-link.com/device/list/v2?limit=10&offset=0&selectUserId=&groupId=&deviceName=&imei=&deviceNo=&workStatus=&continentId=&countryId=&areaId=&sort=&order="
@@ -282,8 +336,11 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
             # First do an initial page load to ensure cookies are set properly
             try:
                 _LOGGER.debug("Making initial request to device page")
-                async with session.get("https://www.aroma-link.com/device/list", timeout=10, ssl=VERIFY_SSL) as init_response:
+                async with session.get("https://www.aroma-link.com/device/list", timeout=10, ssl=verify_ssl) as init_response:
                     _LOGGER.debug(f"Initial page request status: {init_response.status}")
+            except (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLCertVerificationError) as e:
+                _LOGGER.warning(f"SSL verification failed during device page request: {e}")
+                raise
             except Exception as e:
                 _LOGGER.warning(f"Initial page request failed, but continuing: {e}")
             
@@ -296,7 +353,7 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
             
             _LOGGER.debug(f"Fetching device list with URL: {device_list_url}")
             
-            async with session.get(device_list_url, headers=device_headers, ssl=VERIFY_SSL) as device_response:
+            async with session.get(device_list_url, headers=device_headers, ssl=verify_ssl) as device_response:
                 _LOGGER.debug(f"Device list response status: {device_response.status}")
                 
                 if device_response.status == 200:

@@ -1,9 +1,12 @@
 import logging
 import asyncio
 import time
+import ssl
+from contextlib import asynccontextmanager
 from datetime import timedelta
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+import aiohttp
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN, VERIFY_SSL
@@ -14,14 +17,18 @@ _LOGGER = logging.getLogger(__name__)
 class AromaLinkAuthCoordinator(DataUpdateCoordinator):
     """Coordinator for handling authentication and session management."""
 
-    def __init__(self, hass, username, password):
+    def __init__(self, hass, username, password, verify_ssl=VERIFY_SSL, allow_ssl_fallback=True):
         """Initialize the auth coordinator."""
+        self.hass = hass
         self.username = username
         self.password = password
         self.jsessionid = None
         self.language_code = "EN"
         self.session = async_get_clientsession(hass)
         self._last_login_time = 0
+        self.verify_ssl = verify_ssl
+        self.allow_ssl_fallback = allow_ssl_fallback
+        self._ssl_fallback_notified = False
 
         super().__init__(
             hass,
@@ -36,6 +43,50 @@ class AromaLinkAuthCoordinator(DataUpdateCoordinator):
         # Simply ensure login is valid
         await self._ensure_login()
         return {"jsessionid": self.jsessionid, "last_login": self._last_login_time}
+
+    def _notify_ssl_fallback(self, error):
+        """Notify user that SSL verification was disabled after failure."""
+        if self._ssl_fallback_notified:
+            return
+        self._ssl_fallback_notified = True
+        _LOGGER.warning(
+            "SSL verification failed (%s). Falling back to insecure SSL.",
+            error,
+        )
+        try:
+            self.hass.components.persistent_notification.async_create(
+                "SSL verification failed for Aroma-Link. The integration "
+                "is now bypassing certificate checks to keep working. "
+                "You can re-enable verification in integration options.",
+                title="Aroma-Link SSL Fallback",
+                notification_id=f"{DOMAIN}_ssl_fallback",
+            )
+        except Exception as exc:
+            _LOGGER.debug("Could not create SSL fallback notification: %s", exc)
+
+    @asynccontextmanager
+    async def request(self, method, url, **kwargs):
+        """Request wrapper with optional SSL fallback."""
+        ssl_opt = kwargs.pop("ssl", self.verify_ssl)
+        try:
+            async with self.session.request(
+                method, url, ssl=ssl_opt, **kwargs
+            ) as response:
+                yield response
+        except (
+            aiohttp.ClientConnectorCertificateError,
+            aiohttp.ClientSSLError,
+            ssl.SSLCertVerificationError,
+        ) as err:
+            if self.allow_ssl_fallback and self.verify_ssl:
+                self.verify_ssl = False
+                self._notify_ssl_fallback(err)
+                async with self.session.request(
+                    method, url, ssl=False, **kwargs
+                ) as response:
+                    yield response
+            else:
+                raise
 
     async def _ensure_login(self):
         """Ensure we have a valid session, login if needed."""
@@ -68,14 +119,14 @@ class AromaLinkAuthCoordinator(DataUpdateCoordinator):
         try:
             _LOGGER.debug(
                 "Attempting initial GET to aroma-link.com for cookies.")
-            async with self.session.get("https://www.aroma-link.com/", timeout=10, ssl=VERIFY_SSL) as initial_response:
+            async with self.request("get", "https://www.aroma-link.com/", timeout=10) as initial_response:
                 initial_response.raise_for_status()
                 _LOGGER.debug(
                     f"Initial GET successful (status {initial_response.status}).")
 
             _LOGGER.debug(
                 f"Attempting login to {login_url} as {self.username}.")
-            async with self.session.post(login_url, data=data, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
+            async with self.request("post", login_url, data=data, headers=headers, timeout=10) as response:
                 response_text = await response.text()
                 _LOGGER.debug(f"Login response status: {response.status}")
 

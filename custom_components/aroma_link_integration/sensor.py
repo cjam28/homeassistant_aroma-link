@@ -451,6 +451,7 @@ class AromaLinkOilLevelSensor(AromaLinkSensorBase):
             "device_id": self.coordinator.device_id,
             "calibrated": status.get("calibrated", False),
             "calibration_state": status.get("calibration_state", "Idle"),
+            "calibration_method": status.get("calibration_method", "measured"),
             "bottle_capacity_ml": status.get("bottle_capacity_ml"),
             "estimated_remaining_ml": status.get("estimated_remaining_ml"),
             "usage_rate_ml_per_hour": status.get("usage_rate_ml_per_hour"),
@@ -460,6 +461,7 @@ class AromaLinkOilLevelSensor(AromaLinkSensorBase):
             "estimated_days_remaining_schedule": status.get("estimated_days_remaining_schedule"),
             "effective_runtime_hours": status.get("effective_runtime_hours"),
             "runtime_source": status.get("runtime_source"),
+            "manual_rate_ml_per_hour": status.get("manual_rate_ml_per_hour"),
             # Visual helper - icon state
             "level_category": self._get_level_category(status.get("level_percent")),
         }
@@ -529,4 +531,9 @@ class AromaLinkOilRemainingSensor(AromaLinkSensorBase):
             "estimated_hours_remaining_schedule": round(hours_remaining, 1) if hours_remaining else None,
             "estimated_days_remaining_schedule": round(days_remaining, 1) if days_remaining else None,
             "fill_date": status.get("fill_date"),
+            "calibration_method": status.get("calibration_method", "measured"),
+            "manual_start_volume": status.get("manual_start_volume"),
+            "manual_end_volume": status.get("manual_end_volume"),
+            "manual_runtime_hours": status.get("manual_runtime_hours"),
+            "manual_rate_ml_per_hour": status.get("manual_rate_ml_per_hour"),
         }

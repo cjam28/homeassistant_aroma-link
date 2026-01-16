@@ -32,6 +32,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkOilBottleCapacity(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkOilFillVolume(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkOilRemainingInput(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilManualStartVolume(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilManualEndVolume(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilManualRuntimeHours(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilManualRate(coordinator, entry, device_id, device_name))
     
     async_add_entities(entities)
 
@@ -436,4 +440,184 @@ class AromaLinkOilRemainingInput(CoordinatorEntity, NumberEntity):
 
     async def async_set_native_value(self, value):
         self._coordinator.set_oil_calibration(measured_remaining=int(value))
+        self.async_write_ha_state()
+
+
+class AromaLinkOilManualStartVolume(CoordinatorEntity, NumberEntity):
+    """Manual calibration start volume (ml)."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Oil Manual Start Volume"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_manual_start_volume"
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 1000
+        self._attr_native_step = 1
+        self._attr_native_unit_of_measurement = "ml"
+        self._attr_icon = "mdi:water-plus"
+        self._attr_mode = "box"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def native_value(self):
+        return self._coordinator.get_oil_calibration().get("manual_start_volume", 0)
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self._coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_set_native_value(self, value):
+        self._coordinator.set_oil_calibration(manual_start_volume=float(value))
+        self.async_write_ha_state()
+
+
+class AromaLinkOilManualEndVolume(CoordinatorEntity, NumberEntity):
+    """Manual calibration end volume (ml)."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Oil Manual End Volume"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_manual_end_volume"
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 1000
+        self._attr_native_step = 1
+        self._attr_native_unit_of_measurement = "ml"
+        self._attr_icon = "mdi:water-minus"
+        self._attr_mode = "box"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def native_value(self):
+        return self._coordinator.get_oil_calibration().get("manual_end_volume", 0)
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self._coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_set_native_value(self, value):
+        self._coordinator.set_oil_calibration(manual_end_volume=float(value))
+        self.async_write_ha_state()
+
+
+class AromaLinkOilManualRuntimeHours(CoordinatorEntity, NumberEntity):
+    """Manual calibration runtime hours."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Oil Manual Runtime Hours"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_manual_runtime_hours"
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 10000
+        self._attr_native_step = 0.1
+        self._attr_native_unit_of_measurement = "h"
+        self._attr_icon = "mdi:timer"
+        self._attr_mode = "box"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def native_value(self):
+        return self._coordinator.get_oil_calibration().get("manual_runtime_hours", 0)
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self._coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_set_native_value(self, value):
+        self._coordinator.set_oil_calibration(manual_runtime_hours=float(value))
+        self.async_write_ha_state()
+
+
+class AromaLinkOilManualRate(CoordinatorEntity, NumberEntity):
+    """Manual consumption rate override (ml/hr)."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self._coordinator = coordinator
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Oil Manual Rate"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_manual_rate"
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 1000
+        self._attr_native_step = 0.01
+        self._attr_native_unit_of_measurement = "ml/hr"
+        self._attr_icon = "mdi:speedometer"
+        self._attr_mode = "box"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def native_value(self):
+        return self._coordinator.get_oil_calibration().get("manual_rate_ml_per_hour", 0)
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self._coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_set_native_value(self, value):
+        self._coordinator.set_oil_calibration(manual_rate_ml_per_hour=float(value))
         self.async_write_ha_state()

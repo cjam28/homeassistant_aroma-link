@@ -19,8 +19,11 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_POLL_INTERVAL,
     CONF_DEBUG_LOGGING,
+    CONF_VERIFY_SSL,
+    CONF_ALLOW_SSL_FALLBACK,
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_DEBUG_LOGGING,
+    VERIFY_SSL,
     SERVICE_SET_SCHEDULER,
     SERVICE_RUN_DIFFUSER,
     SERVICE_LOAD_WORKSET,
@@ -249,11 +252,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     _apply_debug_logging(entry)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
+    verify_ssl = entry.options.get(CONF_VERIFY_SSL)
+    if verify_ssl is None:
+        verify_ssl = entry.data.get(CONF_VERIFY_SSL)
+    if verify_ssl is None:
+        verify_ssl = False
+
+    allow_ssl_fallback = entry.options.get(CONF_ALLOW_SSL_FALLBACK)
+    if allow_ssl_fallback is None:
+        allow_ssl_fallback = entry.data.get(CONF_ALLOW_SSL_FALLBACK)
+    if allow_ssl_fallback is None:
+        allow_ssl_fallback = True
+
     # Create a single shared coordinator for authentication
     auth_coordinator = AromaLinkAuthCoordinator(
         hass,
         username=username,
-        password=password
+        password=password,
+        verify_ssl=verify_ssl,
+        allow_ssl_fallback=allow_ssl_fallback,
     )
 
     # Force first login and initialization

@@ -7,7 +7,6 @@ from .const import (
     DEFAULT_DIFFUSE_TIME,
     DEFAULT_WORK_DURATION,
     DEFAULT_PAUSE_DURATION,
-    VERIFY_SSL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,10 +64,14 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             "fill_volume": 100,  # Volume at last fill in ml
             "measured_remaining": 0,  # User-measured remaining (for calibration)
             "usage_rate": None,  # ml per work-second (calculated)
-            "calibrated": False,  # Has calibration been done?
             "calibration_runtime": 0,  # Runtime at calibration point
             "fill_date": None,  # YYYY-MM-DD
             "calibration_state": "Idle",  # Idle, Running, Ready to Finalize, Calibrated
+            "calibration_method": "measured",  # measured | manual
+            "manual_start_volume": 0,
+            "manual_end_volume": 0,
+            "manual_runtime_hours": 0,
+            "manual_rate_ml_per_hour": 0,
         }
 
         self._save_oil_state_cb = save_oil_state_cb
@@ -514,6 +517,50 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
         )
 
         return usage_rate
+
+    def apply_manual_override(self):
+        """Apply manual override for calibration.
+
+        Priority:
+        1) manual_rate_ml_per_hour if provided
+        2) compute from manual_start/end + manual_runtime_hours
+        """
+        manual_rate = self._oil_calibration.get("manual_rate_ml_per_hour", 0) or 0
+        start_vol = self._oil_calibration.get("manual_start_volume", 0) or 0
+        end_vol = self._oil_calibration.get("manual_end_volume", 0) or 0
+        runtime_hours = self._oil_calibration.get("manual_runtime_hours", 0) or 0
+
+        usage_rate = None
+        method = None
+
+        if manual_rate > 0:
+            usage_rate = manual_rate / 3600.0
+            method = "manual_rate"
+        elif runtime_hours > 0 and start_vol > 0 and end_vol >= 0:
+            oil_used = start_vol - end_vol
+            if oil_used <= 0:
+                _LOGGER.warning("Manual override failed: end volume must be less than start volume.")
+                return None
+            usage_rate = oil_used / (runtime_hours * 3600.0)
+            method = "manual_calc"
+
+        if not usage_rate:
+            _LOGGER.warning("Manual override failed: provide rate or start/end/runtime.")
+            return None
+
+        self._oil_calibration["usage_rate"] = usage_rate
+        self._oil_calibration["calibration_state"] = "Calibrated"
+        self._oil_calibration["calibration_method"] = "manual"
+        self._oil_calibration["calibration_runtime"] = self._accumulated_work_seconds
+        self._log_oil_event("CAL_MANUAL", f"Manual override applied ({method}).")
+        self._request_oil_state_save()
+
+        _LOGGER.info(
+            "Manual calibration override for %s: %.6f ml/sec (%.2f ml/hour)",
+            self.device_id, usage_rate, usage_rate * 3600
+        )
+
+        return usage_rate
     
     def get_estimated_oil_remaining(self):
         """Calculate estimated remaining oil based on calibration and runtime.
@@ -668,6 +715,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             "fill_volume_ml": cal["fill_volume"],
             "calibrated": calibrated,
             "calibration_state": cal.get("calibration_state", "Idle"),
+            "calibration_method": cal.get("calibration_method", "measured"),
             "fill_date": cal.get("fill_date"),
             "usage_rate_ml_per_sec": cal["usage_rate"],
             "usage_rate_ml_per_hour": cal["usage_rate"] * 3600 if cal["usage_rate"] else None,
@@ -680,6 +728,10 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             "effective_runtime_hours": round(effective_runtime / 3600, 2),
             "runtime_source": runtime_source,
             "completed_cycles": self._completed_cycles,
+            "manual_start_volume": cal.get("manual_start_volume"),
+            "manual_end_volume": cal.get("manual_end_volume"),
+            "manual_runtime_hours": cal.get("manual_runtime_hours"),
+            "manual_rate_ml_per_hour": cal.get("manual_rate_ml_per_hour"),
         }
 
     def export_oil_state(self):
@@ -718,7 +770,12 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 week_day,
                 url,
             )
-            async with self.auth_coordinator.session.get(url, headers=headers, timeout=15, ssl=VERIFY_SSL) as response:
+            async with self.auth_coordinator.request(
+                "get",
+                url,
+                headers=headers,
+                timeout=15,
+            ) as response:
                 if response.status == 200:
                     response_json = await response.json()
                     _LOGGER.debug(
@@ -885,7 +942,12 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 week_day,
                 url,
             )
-            async with self.auth_coordinator.session.get(url, headers=headers, timeout=15, ssl=VERIFY_SSL) as response:
+            async with self.auth_coordinator.request(
+                "get",
+                url,
+                headers=headers,
+                timeout=15,
+            ) as response:
                 if response.status == 200:
                     response_json = await response.json()
                     _LOGGER.debug(
@@ -1013,7 +1075,13 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 week_days,
                 payload,
             )
-            async with self.auth_coordinator.session.post(url, json=payload, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
+            async with self.auth_coordinator.request(
+                "post",
+                url,
+                json=payload,
+                headers=headers,
+                timeout=10,
+            ) as response:
                 if response.status == 200:
                     response_json = await response.json()
                     _LOGGER.debug(
@@ -1079,7 +1147,12 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 self.device_id,
                 url,
             )
-            async with self.auth_coordinator.session.get(url, headers=headers, timeout=15, ssl=VERIFY_SSL) as response:
+            async with self.auth_coordinator.request(
+                "get",
+                url,
+                headers=headers,
+                timeout=15,
+            ) as response:
                 if response.status == 200:
                     response_json = await response.json()
                     _LOGGER.debug(
@@ -1181,14 +1254,13 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
 
         _LOGGER.debug("API diagnostics request: %s %s", method, url)
 
-        async with self.auth_coordinator.session.request(
-            method=method,
-            url=url,
+        async with self.auth_coordinator.request(
+            method,
+            url,
             params=params,
             data=data,
             json=json_body,
             timeout=15,
-            ssl=VERIFY_SSL,
             headers=headers,
         ) as response:
             content_type = response.headers.get("Content-Type", "")
@@ -1234,7 +1306,13 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 self.device_id,
                 data,
             )
-            async with self.auth_coordinator.session.post(url, data=data, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
+            async with self.auth_coordinator.request(
+                "post",
+                url,
+                data=data,
+                headers=headers,
+                timeout=10,
+            ) as response:
                 if response.status == 200:
                     response_text = await response.text()
                     _LOGGER.debug(
@@ -1287,7 +1365,13 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 self.device_id,
                 data,
             )
-            async with self.auth_coordinator.session.post(url, data=data, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
+            async with self.auth_coordinator.request(
+                "post",
+                url,
+                data=data,
+                headers=headers,
+                timeout=10,
+            ) as response:
                 if response.status == 200:
                     response_text = await response.text()
                     _LOGGER.debug(
@@ -1390,7 +1474,13 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 self.device_id,
                 payload,
             )
-            async with self.auth_coordinator.session.post(url, json=payload, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
+            async with self.auth_coordinator.request(
+                "post",
+                url,
+                json=payload,
+                headers=headers,
+                timeout=10,
+            ) as response:
                 if response.status == 200:
                     response_text = await response.text()
                     _LOGGER.debug(

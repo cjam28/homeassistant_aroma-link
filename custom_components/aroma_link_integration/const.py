@@ -10,6 +10,8 @@ CONF_DIFFUSE_TIME = "diffuse_time"
 CONF_WORK_DURATION = "work_duration"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_DEBUG_LOGGING = "debug_logging"
+CONF_VERIFY_SSL = "verify_ssl"
+CONF_ALLOW_SSL_FALLBACK = "allow_ssl_fallback"
 
 # Default values
 DEFAULT_DIFFUSE_TIME = 60  # seconds
@@ -19,6 +21,8 @@ DEFAULT_POLL_INTERVAL_SECONDS = 60  # Default: 60 seconds (1 minute)
 MIN_POLL_INTERVAL_SECONDS = 5  # Minimum: 5 seconds (use with caution!)
 MAX_POLL_INTERVAL_SECONDS = 900  # Maximum: 15 minutes
 DEFAULT_DEBUG_LOGGING = False
+DEFAULT_VERIFY_SSL = True
+DEFAULT_ALLOW_SSL_FALLBACK = True
 
 # Services
 SERVICE_SET_SCHEDULER = "set_scheduler"
@@ -34,4 +38,5 @@ ATTR_PAUSE_DURATION = "pause_duration"
 ATTR_WEEK_DAYS = "week_days"
 
 # SSL Configuration
-VERIFY_SSL = False  # Set to False to bypass SSL certificate verification for Aroma-Link API
+# Default SSL verification setting (per-entry override supported).
+VERIFY_SSL = True
