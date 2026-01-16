@@ -29,6 +29,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkFirmwareVersionSensor(coordinator, entry, device_id, device_info["name"]))
         entities.append(AromaLinkLastUpdateSensor(coordinator, entry, device_id, device_info["name"]))
         entities.append(AromaLinkScheduleMatrixSensor(coordinator, entry, device_id, device_info["name"]))
+        entities.append(AromaLinkCumulativeRuntimeSensor(coordinator, entry, device_id, device_info["name"]))
+        # Oil level sensors
+        entities.append(AromaLinkOilLevelSensor(coordinator, entry, device_id, device_info["name"]))
+        entities.append(AromaLinkOilRemainingSensor(coordinator, entry, device_id, device_info["name"]))
     
     async_add_entities(entities)
 
@@ -328,4 +332,195 @@ class AromaLinkScheduleMatrixSensor(AromaLinkSensorBase):
             "current_program": self.coordinator._current_program,
             "selected_days": self.coordinator._selected_days,
             "device_id": self.coordinator.device_id,
+        }
+
+
+class AromaLinkCumulativeRuntimeSensor(AromaLinkSensorBase):
+    """Sensor for cumulative work runtime (for oil tracking).
+    
+    Uses cycle detection from workRemainTime/pauseRemainTime transitions
+    to accurately count completed work cycles regardless of poll interval.
+    """
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the cumulative runtime sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            device_id,
+            device_name,
+            "Cumulative Runtime",
+            icon="mdi:timer-sand",
+            unit="s",
+        )
+        self._attr_state_class = "total_increasing"
+        self._attr_device_class = SensorDeviceClass.DURATION
+
+    @property
+    def native_value(self):
+        """Return the accumulated work seconds."""
+        return round(self.coordinator.get_cumulative_work_seconds(), 1)
+
+    @property
+    def extra_state_attributes(self):
+        """Return comprehensive oil tracking attributes."""
+        raw_data = self.coordinator.data or {}
+        oil_info = self.coordinator.get_oil_tracking_info()
+        cumulative_secs = oil_info.get("accumulated_work_seconds", 0)
+        
+        # Convert to human-readable format
+        hours = int(cumulative_secs // 3600)
+        minutes = int((cumulative_secs % 3600) // 60)
+        seconds = int(cumulative_secs % 60)
+        
+        # Tracking duration
+        track_secs = oil_info.get("tracking_duration_seconds", 0)
+        track_hours = round(track_secs / 3600, 2)
+        track_days = round(track_secs / 86400, 2)
+        
+        # Calculate duty cycle
+        work_dur = oil_info.get("current_work_duration", 5)
+        pause_dur = oil_info.get("current_pause_duration", 900)
+        duty_cycle = (work_dur / (work_dur + pause_dur) * 100) if (work_dur + pause_dur) > 0 else 0
+        
+        # Format recent events for display
+        recent_events = oil_info.get("recent_events", [])
+        events_str = "; ".join([f"{e[0]} {e[1]}: {e[2]}" for e in recent_events[-5:]])
+        
+        return {
+            "device_id": self.coordinator.device_id,
+            # Main tracking values
+            "formatted_runtime": f"{hours}h {minutes}m {seconds}s",
+            "runtime_hours": round(cumulative_secs / 3600, 3),
+            "runtime_minutes": round(cumulative_secs / 60, 1),
+            "completed_cycles": oil_info.get("completed_cycles", 0),
+            # Tracking status
+            "tracking_active": oil_info.get("tracking_active", False),
+            "tracking_duration_hours": track_hours,
+            "tracking_duration_days": track_days,
+            # Current settings
+            "current_work_duration": work_dur,
+            "current_pause_duration": pause_dur,
+            "duty_cycle_percent": round(duty_cycle, 3),
+            # Current state
+            "current_work_status": raw_data.get("workStatus", 0),
+            "current_work_remain": raw_data.get("workRemainTime", 0),
+            "current_pause_remain": raw_data.get("pauseRemainTime", 0),
+            # API reference values
+            "api_pump_count": raw_data.get("pumpCount", 0),
+            "api_pump_count_delta": oil_info.get("pump_count_delta"),
+            "baseline_pump_count": oil_info.get("baseline_pump_count"),
+            "api_run_count": raw_data.get("runCount", 0),
+            # Recent events log
+            "recent_events": events_str,
+            # Calibration helper
+            "calibration_note": "Fill oil, call reset_oil_runtime, run for days, measure remaining, calculate: used_ml / runtime_seconds",
+        }
+
+
+class AromaLinkOilLevelSensor(AromaLinkSensorBase):
+    """Sensor showing oil level as percentage (for bottle visualization)."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the oil level sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            device_id,
+            device_name,
+            "Oil Level",
+            icon="mdi:bottle-tonic-outline",
+            unit="%",
+        )
+
+    @property
+    def native_value(self):
+        """Return the oil level percentage."""
+        level = self.coordinator.get_oil_level_percent()
+        if level is not None:
+            return round(level, 1)
+        return None
+
+    @property
+    def extra_state_attributes(self):
+        """Return oil status details."""
+        status = self.coordinator.get_oil_status()
+        cal = self.coordinator.get_oil_calibration()
+        
+        return {
+            "device_id": self.coordinator.device_id,
+            "calibrated": status.get("calibrated", False),
+            "bottle_capacity_ml": status.get("bottle_capacity_ml"),
+            "estimated_remaining_ml": status.get("estimated_remaining_ml"),
+            "usage_rate_ml_per_hour": status.get("usage_rate_ml_per_hour"),
+            "runtime_since_fill_hours": status.get("runtime_since_fill_hours"),
+            "completed_cycles": status.get("completed_cycles"),
+            # Visual helper - icon state
+            "level_category": self._get_level_category(status.get("level_percent")),
+        }
+    
+    def _get_level_category(self, level_pct):
+        """Return a category for visual display."""
+        if level_pct is None:
+            return "unknown"
+        if level_pct > 75:
+            return "full"
+        if level_pct > 50:
+            return "good"
+        if level_pct > 25:
+            return "low"
+        if level_pct > 10:
+            return "very_low"
+        return "empty"
+
+
+class AromaLinkOilRemainingSensor(AromaLinkSensorBase):
+    """Sensor showing estimated remaining oil in ml."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the oil remaining sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            device_id,
+            device_name,
+            "Oil Remaining",
+            icon="mdi:water",
+            unit="ml",
+        )
+
+    @property
+    def native_value(self):
+        """Return the estimated remaining oil in ml."""
+        remaining = self.coordinator.get_estimated_oil_remaining()
+        if remaining is not None:
+            return round(remaining, 1)
+        return None
+
+    @property
+    def extra_state_attributes(self):
+        """Return comprehensive oil status."""
+        status = self.coordinator.get_oil_status()
+        
+        # Estimate hours until empty
+        hours_remaining = None
+        if status.get("usage_rate_ml_per_hour") and status.get("estimated_remaining_ml"):
+            usage_per_hour = status["usage_rate_ml_per_hour"]
+            remaining = status["estimated_remaining_ml"]
+            if usage_per_hour > 0:
+                hours_remaining = remaining / usage_per_hour
+        
+        return {
+            "device_id": self.coordinator.device_id,
+            "calibrated": status.get("calibrated", False),
+            "fill_volume_ml": status.get("fill_volume_ml"),
+            "bottle_capacity_ml": status.get("bottle_capacity_ml"),
+            "level_percent": status.get("level_percent"),
+            "usage_rate_ml_per_sec": status.get("usage_rate_ml_per_sec"),
+            "usage_rate_ml_per_hour": status.get("usage_rate_ml_per_hour"),
+            "runtime_since_fill_sec": status.get("runtime_since_fill_sec"),
+            "runtime_since_fill_hours": status.get("runtime_since_fill_hours"),
+            "completed_cycles_since_fill": status.get("completed_cycles"),
+            "estimated_hours_remaining": round(hours_remaining, 1) if hours_remaining else None,
+            "estimated_days_remaining": round(hours_remaining / 24, 1) if hours_remaining else None,
         }

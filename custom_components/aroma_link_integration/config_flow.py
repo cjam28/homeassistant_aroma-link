@@ -13,7 +13,9 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_POLL_INTERVAL,
     CONF_DEBUG_LOGGING,
-    DEFAULT_POLL_INTERVAL_MINUTES,
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    MIN_POLL_INTERVAL_SECONDS,
+    MAX_POLL_INTERVAL_SECONDS,
     DEFAULT_DEBUG_LOGGING,
     VERIFY_SSL,
 )
@@ -113,22 +115,35 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         options = self._config_entry.options
+        
+        # Handle migration from old minutes-based config
+        current_poll = options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_SECONDS)
+        # If value is very small (1-30), it's likely old minutes format - convert
+        if current_poll <= 30:
+            current_poll = current_poll * 60
+        
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Optional(
                         CONF_POLL_INTERVAL,
-                        default=options.get(
-                            CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_MINUTES
-                        ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+                        default=current_poll,
+                        description={"suggested_value": current_poll},
+                    ): vol.All(
+                        vol.Coerce(int), 
+                        vol.Range(min=MIN_POLL_INTERVAL_SECONDS, max=MAX_POLL_INTERVAL_SECONDS)
+                    ),
                     vol.Optional(
                         CONF_DEBUG_LOGGING,
                         default=options.get(CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING),
                     ): bool,
                 }
             ),
+            description_placeholders={
+                "min_poll": str(MIN_POLL_INTERVAL_SECONDS),
+                "max_poll": str(MAX_POLL_INTERVAL_SECONDS),
+            },
         )
         
     async def _authenticate(self, username, password):

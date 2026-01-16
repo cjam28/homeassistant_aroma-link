@@ -21,6 +21,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkSaveSettingsButton(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkSaveProgramButton(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkSyncSchedulesButton(coordinator, entry, device_id, device_name))
+        # Oil tracking buttons
+        entities.append(AromaLinkOilFillButton(coordinator, entry, device_id, device_name))
+        entities.append(AromaLinkOilCalibrateButton(coordinator, entry, device_id, device_name))
     
     async_add_entities(entities)
 
@@ -262,3 +265,92 @@ class AromaLinkSyncSchedulesButton(CoordinatorEntity, ButtonEntity):
         await self.coordinator.async_fetch_all_schedules()
         self.coordinator.async_update_listeners()
         _LOGGER.info("Schedule sync complete for device %s", self.coordinator.device_id)
+
+
+# ============================================================
+# OIL TRACKING BUTTONS
+# ============================================================
+
+class AromaLinkOilFillButton(CoordinatorEntity, ButtonEntity):
+    """Button to mark oil as just filled."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Oil Fill (Reset)"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_fill"
+        self._attr_icon = "mdi:water-plus"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self.coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_press(self):
+        """Mark oil as just filled - resets runtime tracking."""
+        _LOGGER.info("Oil fill button pressed for device %s", self.coordinator.device_id)
+        self.coordinator.reset_oil_fill()
+        self.coordinator.async_update_listeners()
+
+
+class AromaLinkOilCalibrateButton(CoordinatorEntity, ButtonEntity):
+    """Button to calculate oil usage rate from measured remaining."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._device_id = device_id
+        self._name = f"{device_name} Oil Calibrate"
+        self._unique_id = f"{entry.data['username']}_{device_id}_oil_calibrate"
+        self._attr_icon = "mdi:calculator"
+        self._attr_entity_category = "config"
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def unique_id(self):
+        return self._unique_id
+
+    @property
+    def device_info(self):
+        return DeviceInfo(
+            identifiers={(DOMAIN, f"{self._entry.data['username']}_{self._device_id}")},
+            name=self.coordinator.device_name,
+            manufacturer="Aroma-Link",
+            model="Diffuser",
+        )
+
+    async def async_press(self):
+        """Calculate usage rate from fill volume, measured remaining, and runtime."""
+        _LOGGER.info("Oil calibrate button pressed for device %s", self.coordinator.device_id)
+        
+        usage_rate = self.coordinator.perform_oil_calibration()
+        
+        if usage_rate:
+            _LOGGER.info(
+                "Oil calibration successful for %s: %.6f ml/sec (%.2f ml/hour)",
+                self.coordinator.device_id, usage_rate, usage_rate * 3600
+            )
+        else:
+            _LOGGER.warning("Oil calibration failed for %s - check runtime and measured values", 
+                          self.coordinator.device_id)
+        
+        self.coordinator.async_update_listeners()

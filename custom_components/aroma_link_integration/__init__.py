@@ -18,7 +18,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_POLL_INTERVAL,
     CONF_DEBUG_LOGGING,
-    DEFAULT_POLL_INTERVAL_MINUTES,
+    DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_DEBUG_LOGGING,
     SERVICE_SET_SCHEDULER,
     SERVICE_RUN_DIFFUSER,
@@ -261,9 +261,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Store coordinators for each device
     device_coordinators = {}
 
-    poll_interval = entry.options.get(
-        CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_MINUTES
+    poll_interval_seconds = entry.options.get(
+        CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_SECONDS
     )
+    # Handle migration from old minutes-based config
+    if poll_interval_seconds <= 30:
+        poll_interval_seconds = poll_interval_seconds * 60
 
     # Create coordinator for each device
     for device in devices:
@@ -278,7 +281,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             auth_coordinator=auth_coordinator,
             device_id=device_id,
             device_name=device_name,
-            update_interval_minutes=poll_interval,
+            update_interval_seconds=poll_interval_seconds,
         )
 
         # Do first refresh for each device
@@ -672,6 +675,271 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         "refresh_all_schedules",
         refresh_all_schedules_service,
         schema=REFRESH_ALL_SCHEDULES_SCHEMA
+    )
+
+    # ============================================================
+    # TIMED RUN SERVICES (server-side timer, survives browser close)
+    # ============================================================
+    
+    # Storage for active timed runs: {device_id: {"cancel_callback": fn, "end_time": timestamp}}
+    if "timed_runs" not in hass.data[DOMAIN]:
+        hass.data[DOMAIN]["timed_runs"] = {}
+    
+    timed_runs = hass.data[DOMAIN]["timed_runs"]
+
+    async def _turn_off_device(device_id: str):
+        """Turn off device when timer expires."""
+        coordinator = device_coordinators.get(device_id)
+        if coordinator:
+            _LOGGER.info(f"Timed run complete for device {device_id}, turning off")
+            try:
+                await coordinator.set_power(False)
+                # Fire event so card can update
+                hass.bus.async_fire(
+                    f"{DOMAIN}_timed_run_complete",
+                    {"device_id": device_id}
+                )
+            except Exception as e:
+                _LOGGER.error(f"Failed to turn off device {device_id}: {e}")
+        
+        # Clean up state
+        if device_id in timed_runs:
+            del timed_runs[device_id]
+        
+        # Update sensor state
+        _update_timed_run_sensor(device_id)
+
+    def _update_timed_run_sensor(device_id: str):
+        """Update the sensor with timer state."""
+        coordinator = device_coordinators.get(device_id)
+        if coordinator:
+            coordinator.async_set_updated_data(coordinator.data)
+
+    async def start_timed_run_service(call: ServiceCall):
+        """Start a timed run for a device."""
+        device_id = call.data.get("device_id")
+        duration_hours = call.data.get("duration_hours", 6.0)
+        work_sec = call.data.get("work_sec")
+        pause_sec = call.data.get("pause_sec")
+
+        # Get coordinator
+        coordinator = None
+        if device_id and device_id in device_coordinators:
+            coordinator = device_coordinators[device_id]
+            device_id = device_id  # Already set
+        elif len(device_coordinators) == 1:
+            device_id = list(device_coordinators.keys())[0]
+            coordinator = device_coordinators[device_id]
+        else:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return
+
+        # Cancel any existing timer for this device
+        if device_id in timed_runs:
+            existing = timed_runs[device_id]
+            if existing.get("cancel_callback"):
+                existing["cancel_callback"]()
+            del timed_runs[device_id]
+
+        # Apply work/pause settings if provided
+        if work_sec is not None or pause_sec is not None:
+            try:
+                await coordinator.set_scheduler(
+                    work_duration=work_sec or coordinator.data.get("workRemainTime", 5),
+                    pause_duration=pause_sec or coordinator.data.get("pauseRemainTime", 900)
+                )
+            except Exception as e:
+                _LOGGER.warning(f"Failed to set work/pause for timed run: {e}")
+
+        # Turn on the device
+        try:
+            await coordinator.set_power(True)
+        except Exception as e:
+            _LOGGER.error(f"Failed to turn on device for timed run: {e}")
+            return
+
+        # Schedule turn-off
+        duration_seconds = duration_hours * 3600
+        end_time = hass.loop.time() + duration_seconds
+        
+        cancel_callback = hass.helpers.event.async_call_later(
+            hass,
+            duration_seconds,
+            lambda _: hass.async_create_task(_turn_off_device(device_id))
+        )
+
+        timed_runs[device_id] = {
+            "cancel_callback": cancel_callback,
+            "end_time": end_time,
+            "duration_hours": duration_hours
+        }
+
+        _LOGGER.info(f"Started timed run for device {device_id}: {duration_hours} hours")
+        
+        # Fire event for card
+        hass.bus.async_fire(
+            f"{DOMAIN}_timed_run_started",
+            {
+                "device_id": device_id,
+                "duration_hours": duration_hours,
+                "end_time": end_time
+            }
+        )
+        
+        _update_timed_run_sensor(device_id)
+
+    async def cancel_timed_run_service(call: ServiceCall):
+        """Cancel a timed run for a device."""
+        device_id = call.data.get("device_id")
+
+        # Get device_id if not specified
+        if not device_id and len(device_coordinators) == 1:
+            device_id = list(device_coordinators.keys())[0]
+        
+        if not device_id:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return
+
+        if device_id not in timed_runs:
+            _LOGGER.warning(f"No timed run active for device {device_id}")
+            return
+
+        # Cancel the timer
+        existing = timed_runs[device_id]
+        if existing.get("cancel_callback"):
+            existing["cancel_callback"]()
+        
+        del timed_runs[device_id]
+        
+        _LOGGER.info(f"Cancelled timed run for device {device_id}")
+        
+        # Fire event for card
+        hass.bus.async_fire(
+            f"{DOMAIN}_timed_run_cancelled",
+            {"device_id": device_id}
+        )
+        
+        _update_timed_run_sensor(device_id)
+
+    async def get_timed_run_status_service(call: ServiceCall):
+        """Get the status of timed runs."""
+        device_id = call.data.get("device_id")
+        
+        status = {}
+        current_time = hass.loop.time()
+        
+        for dev_id, timer_data in timed_runs.items():
+            if device_id and dev_id != device_id:
+                continue
+            remaining = max(0, timer_data["end_time"] - current_time)
+            status[dev_id] = {
+                "active": True,
+                "remaining_seconds": int(remaining),
+                "duration_hours": timer_data["duration_hours"]
+            }
+        
+        # Fire event with status
+        hass.bus.async_fire(
+            f"{DOMAIN}_timed_run_status",
+            {"status": status}
+        )
+        
+        return status
+
+    START_TIMED_RUN_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+        vol.Optional("duration_hours", default=6.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=24)),
+        vol.Optional("work_sec"): vol.All(vol.Coerce(int), vol.Range(min=1, max=999)),
+        vol.Optional("pause_sec"): vol.All(vol.Coerce(int), vol.Range(min=1, max=9999)),
+    })
+
+    CANCEL_TIMED_RUN_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+    })
+
+    GET_TIMED_RUN_STATUS_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+    })
+
+    hass.services.async_register(
+        DOMAIN,
+        "start_timed_run",
+        start_timed_run_service,
+        schema=START_TIMED_RUN_SCHEMA
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "cancel_timed_run",
+        cancel_timed_run_service,
+        schema=CANCEL_TIMED_RUN_SCHEMA
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        "get_timed_run_status",
+        get_timed_run_status_service,
+        schema=GET_TIMED_RUN_STATUS_SCHEMA
+    )
+
+    # Store timed_runs reference in domain data for access by sensors
+    hass.data[DOMAIN]["timed_runs"] = timed_runs
+
+    # ============================================================
+    # OIL TRACKING SERVICES
+    # ============================================================
+
+    async def reset_oil_runtime_service(call: ServiceCall):
+        """Reset oil tracking (call when refilling oil).
+        
+        Starts tracking cumulative work time using duty-cycle calculation.
+        Also captures pumpCount as secondary reference.
+        """
+        device_id = call.data.get("device_id")
+
+        coordinator = None
+        if device_id and device_id in device_coordinators:
+            coordinator = device_coordinators[device_id]
+        elif len(device_coordinators) == 1:
+            coordinator = list(device_coordinators.values())[0]
+        else:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return
+
+        # Get current pump count from last data refresh
+        current_pump_count = None
+        if coordinator.data:
+            current_pump_count = coordinator.data.get("pumpCount", 0)
+        
+        coordinator.reset_oil_tracking(current_pump_count)
+        
+        oil_info = coordinator.get_oil_tracking_info()
+        
+        _LOGGER.info(
+            f"Reset oil tracking for device {coordinator.device_id}. "
+            f"Baseline pumpCount: {current_pump_count}, "
+            f"Current settings: work={oil_info.get('last_work_duration')}s, "
+            f"pause={oil_info.get('last_pause_duration')}s"
+        )
+        
+        hass.bus.async_fire(
+            f"{DOMAIN}_oil_runtime_reset",
+            {
+                "device_id": coordinator.device_id,
+                "baseline_pump_count": current_pump_count,
+                "tracking_started": True,
+            }
+        )
+
+    RESET_OIL_RUNTIME_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+    })
+
+    hass.services.async_register(
+        DOMAIN,
+        "reset_oil_runtime",
+        reset_oil_runtime_service,
+        schema=RESET_OIL_RUNTIME_SCHEMA
     )
 
     # Use the new method

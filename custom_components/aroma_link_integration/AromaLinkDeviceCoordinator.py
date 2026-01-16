@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
     """Coordinator for handling device data and control."""
 
-    def __init__(self, hass, auth_coordinator, device_id, device_name, update_interval_minutes=1):
+    def __init__(self, hass, auth_coordinator, device_id, device_name, update_interval_seconds=60):
         """Initialize the device coordinator."""
         self.hass = hass
         self.auth_coordinator = auth_coordinator
@@ -30,12 +30,41 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
         self._current_program = 1  # Currently selected program (1-5)
         self._current_day = 0  # Currently selected day for viewing (0-6)
         self._selected_days = [0]  # Days selected for saving (list of 0-6)
+        
+        # Oil tracking - cycle detection approach
+        import time
+        self._oil_tracking_active = False
+        self._oil_tracking_start_time = None
+        self._baseline_pump_count = None
+        self._accumulated_work_seconds = 0.0
+        self._completed_cycles = 0
+        
+        # Previous poll state for cycle detection
+        self._prev_device_on = False
+        self._prev_work_status = 0  # 0=off, 1=pausing, 2=working
+        self._prev_work_remain = 0
+        self._prev_pause_remain = 0
+        self._prev_work_duration = 5  # Current work setting
+        self._prev_pause_duration = 900  # Current pause setting
+        
+        # Event log for debugging
+        self._oil_events = []  # List of (timestamp, event, details)
+        
+        # Oil calibration data (persists until recalibration)
+        self._oil_calibration = {
+            "bottle_capacity": 100,  # Max bottle size in ml
+            "fill_volume": 100,  # Volume at last fill in ml
+            "measured_remaining": 0,  # User-measured remaining (for calibration)
+            "usage_rate": None,  # ml per work-second (calculated)
+            "calibrated": False,  # Has calibration been done?
+            "calibration_runtime": 0,  # Runtime at calibration point
+        }
 
         super().__init__(
             hass,
             _LOGGER,
             name=f"{DOMAIN}_{device_id}",
-            update_interval=timedelta(minutes=update_interval_minutes),
+            update_interval=timedelta(seconds=update_interval_seconds),
         )
 
     @property
@@ -67,6 +96,334 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
     def pause_duration(self, value):
         """Set the pause duration."""
         self._pause_duration = value
+
+    # ============================================================
+    # OIL TRACKING METHODS (cycle detection from workRemain/pauseRemain)
+    # ============================================================
+    
+    def reset_oil_tracking(self, current_pump_count=None):
+        """Reset oil tracking (call when refilling oil).
+        
+        Uses cycle detection from workRemainTime/pauseRemainTime changes
+        to accurately count completed work cycles.
+        """
+        import time
+        self._oil_tracking_active = True
+        self._oil_tracking_start_time = time.time()
+        self._accumulated_work_seconds = 0.0
+        self._completed_cycles = 0
+        self._oil_events = []
+        
+        # Reset previous state
+        self._prev_device_on = False
+        self._prev_work_status = 0
+        self._prev_work_remain = 0
+        self._prev_pause_remain = 0
+        
+        # Capture pumpCount as reference
+        if current_pump_count is not None:
+            self._baseline_pump_count = current_pump_count
+        elif self.data and "pumpCount" in self.data:
+            self._baseline_pump_count = self.data.get("pumpCount", 0)
+        else:
+            self._baseline_pump_count = 0
+        
+        self._log_oil_event("RESET", f"Started tracking. Baseline pumpCount: {self._baseline_pump_count}")
+        
+        _LOGGER.info(
+            "Reset oil tracking for device %s. Baseline pumpCount: %s",
+            self.device_id, self._baseline_pump_count
+        )
+    
+    def _log_oil_event(self, event_type: str, details: str):
+        """Log an oil tracking event for debugging."""
+        import time
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self._oil_events.append((timestamp, event_type, details))
+        # Keep only last 50 events
+        if len(self._oil_events) > 50:
+            self._oil_events = self._oil_events[-50:]
+        _LOGGER.debug(f"Oil event [{self.device_id}] {event_type}: {details}")
+    
+    def update_oil_tracking(
+        self,
+        device_on: bool,
+        work_status: int,
+        work_remain: int,
+        pause_remain: int,
+        work_duration: int,
+        pause_duration: int,
+    ):
+        """Update oil tracking using cycle detection.
+        
+        Detects completed work cycles by monitoring:
+        - workStatus transitions (working → pausing)
+        - workRemainTime resets (indicates new cycle)
+        - pauseRemainTime jumps (indicates work just completed)
+        
+        Args:
+            device_on: Whether device is on
+            work_status: 0=off, 1=pausing, 2=working
+            work_remain: Seconds remaining in current work cycle
+            pause_remain: Seconds remaining in current pause cycle
+            work_duration: Current work setting (seconds per spray)
+            pause_duration: Current pause setting
+        """
+        if not self._oil_tracking_active:
+            # Update state but don't track
+            self._prev_device_on = device_on
+            self._prev_work_status = work_status
+            self._prev_work_remain = work_remain
+            self._prev_pause_remain = pause_remain
+            self._prev_work_duration = work_duration
+            self._prev_pause_duration = pause_duration
+            return
+        
+        cycle_completed = False
+        work_seconds_to_add = 0
+        
+        # Detection Case 1: Device turned OFF
+        if self._prev_device_on and not device_on:
+            self._log_oil_event("OFF", "Device turned off")
+        
+        # Detection Case 2: Device turned ON
+        elif not self._prev_device_on and device_on:
+            self._log_oil_event("ON", f"Device turned on. Status={work_status}")
+        
+        # Detection Case 3: Device was ON and still ON - check for cycle completion
+        elif self._prev_device_on and device_on:
+            
+            # Case 3a: Was working (2), now pausing (1) → work cycle completed!
+            if self._prev_work_status == 2 and work_status == 1:
+                cycle_completed = True
+                work_seconds_to_add = self._prev_work_duration
+                self._log_oil_event(
+                    "CYCLE", 
+                    f"Work→Pause transition. +{work_seconds_to_add}s"
+                )
+            
+            # Case 3b: workRemain jumped UP (e.g., 2 → 10) → new cycle started
+            elif work_status == 2 and work_remain > self._prev_work_remain + 2:
+                # Only count if we were previously in a work cycle
+                if self._prev_work_status == 2:
+                    cycle_completed = True
+                    work_seconds_to_add = self._prev_work_duration
+                    self._log_oil_event(
+                        "CYCLE",
+                        f"workRemain reset {self._prev_work_remain}→{work_remain}. +{work_seconds_to_add}s"
+                    )
+            
+            # Case 3c: pauseRemain jumped UP significantly → new pause started after work
+            elif work_status == 1 and self._prev_work_status == 1:
+                if pause_remain > self._prev_pause_remain + 100:
+                    # Pause timer reset = new cycle started
+                    cycle_completed = True
+                    work_seconds_to_add = self._prev_work_duration
+                    self._log_oil_event(
+                        "CYCLE",
+                        f"pauseRemain reset {self._prev_pause_remain}→{pause_remain}. +{work_seconds_to_add}s"
+                    )
+            
+            # Case 3d: Settings changed
+            if work_duration != self._prev_work_duration or pause_duration != self._prev_pause_duration:
+                self._log_oil_event(
+                    "SETTINGS",
+                    f"Changed: work {self._prev_work_duration}→{work_duration}s, "
+                    f"pause {self._prev_pause_duration}→{pause_duration}s"
+                )
+        
+        # Apply detected cycle
+        if cycle_completed:
+            self._accumulated_work_seconds += work_seconds_to_add
+            self._completed_cycles += 1
+            _LOGGER.info(
+                "Oil tracking [%s]: Cycle #%d completed. +%ds work. Total: %.1fs",
+                self.device_id, self._completed_cycles, 
+                work_seconds_to_add, self._accumulated_work_seconds
+            )
+        
+        # Update previous state for next poll
+        self._prev_device_on = device_on
+        self._prev_work_status = work_status
+        self._prev_work_remain = work_remain
+        self._prev_pause_remain = pause_remain
+        self._prev_work_duration = work_duration
+        self._prev_pause_duration = pause_duration
+    
+    def get_cumulative_work_seconds(self):
+        """Get accumulated work seconds since last fill."""
+        return self._accumulated_work_seconds
+    
+    def get_completed_cycles(self):
+        """Get number of completed work/spray cycles."""
+        return self._completed_cycles
+    
+    def get_pump_count_delta(self):
+        """Get pumpCount change since fill (API reference)."""
+        if self._baseline_pump_count is None:
+            return None
+        current = self.data.get("pumpCount", 0) if self.data else 0
+        return current - self._baseline_pump_count
+    
+    def get_oil_tracking_info(self):
+        """Get comprehensive oil tracking data."""
+        import time
+        tracking_duration = 0
+        if self._oil_tracking_start_time:
+            tracking_duration = time.time() - self._oil_tracking_start_time
+        
+        return {
+            "tracking_active": self._oil_tracking_active,
+            "tracking_duration_seconds": tracking_duration,
+            "accumulated_work_seconds": self._accumulated_work_seconds,
+            "completed_cycles": self._completed_cycles,
+            "baseline_pump_count": self._baseline_pump_count,
+            "pump_count_delta": self.get_pump_count_delta(),
+            "current_work_duration": self._prev_work_duration,
+            "current_pause_duration": self._prev_pause_duration,
+            "recent_events": self._oil_events[-10:] if self._oil_events else [],
+        }
+    
+    def get_oil_events_log(self):
+        """Get the full event log for debugging."""
+        return self._oil_events.copy()
+    
+    def set_accumulated_work_seconds(self, seconds):
+        """Set accumulated work seconds (for restoring state)."""
+        self._accumulated_work_seconds = seconds
+    
+    def set_completed_cycles(self, cycles):
+        """Set completed cycles (for restoring state)."""
+        self._completed_cycles = cycles
+    
+    def set_oil_tracking_start_time(self, timestamp):
+        """Set tracking start time (for restoring state)."""
+        self._oil_tracking_start_time = timestamp
+        self._oil_tracking_active = timestamp is not None
+    
+    # ============================================================
+    # OIL CALIBRATION METHODS
+    # ============================================================
+    
+    def get_oil_calibration(self):
+        """Get current oil calibration data."""
+        return self._oil_calibration.copy()
+    
+    def set_oil_calibration(self, **kwargs):
+        """Update oil calibration values."""
+        for key, value in kwargs.items():
+            if key in self._oil_calibration:
+                self._oil_calibration[key] = value
+        _LOGGER.debug("Oil calibration updated: %s", self._oil_calibration)
+    
+    def perform_oil_calibration(self):
+        """Calculate usage rate from fill volume, measured remaining, and runtime.
+        
+        Call this after user enters measured_remaining value.
+        Returns the calculated usage rate in ml/second of work time.
+        """
+        fill_vol = self._oil_calibration["fill_volume"]
+        remaining = self._oil_calibration["measured_remaining"]
+        runtime = self._accumulated_work_seconds
+        
+        if runtime <= 0:
+            _LOGGER.warning("Cannot calibrate: no runtime recorded")
+            return None
+        
+        oil_used = fill_vol - remaining
+        if oil_used <= 0:
+            _LOGGER.warning("Cannot calibrate: oil used is zero or negative")
+            return None
+        
+        usage_rate = oil_used / runtime  # ml per second of work
+        
+        self._oil_calibration["usage_rate"] = usage_rate
+        self._oil_calibration["calibrated"] = True
+        self._oil_calibration["calibration_runtime"] = runtime
+        
+        _LOGGER.info(
+            "Oil calibration complete for %s: %.6f ml/sec (%.2f ml/hour of spray)",
+            self.device_id, usage_rate, usage_rate * 3600
+        )
+        
+        return usage_rate
+    
+    def get_estimated_oil_remaining(self):
+        """Calculate estimated remaining oil based on calibration and runtime.
+        
+        Returns remaining ml, or None if not calibrated.
+        """
+        if not self._oil_calibration["calibrated"] or self._oil_calibration["usage_rate"] is None:
+            return None
+        
+        fill_vol = self._oil_calibration["fill_volume"]
+        usage_rate = self._oil_calibration["usage_rate"]
+        runtime = self._accumulated_work_seconds
+        
+        oil_used = runtime * usage_rate
+        remaining = fill_vol - oil_used
+        
+        return max(0, remaining)  # Don't go negative
+    
+    def get_oil_level_percent(self):
+        """Get oil level as percentage of bottle capacity.
+        
+        Returns percentage (0-100), or None if not calibrated.
+        """
+        remaining = self.get_estimated_oil_remaining()
+        if remaining is None:
+            return None
+        
+        capacity = self._oil_calibration["bottle_capacity"]
+        if capacity <= 0:
+            return None
+        
+        return min(100, (remaining / capacity) * 100)
+    
+    def reset_oil_fill(self):
+        """Mark oil as just filled (resets runtime tracking).
+        
+        Sets fill_volume = bottle_capacity and resets tracking.
+        Preserves calibrated usage_rate if already calibrated.
+        """
+        capacity = self._oil_calibration["bottle_capacity"]
+        self._oil_calibration["fill_volume"] = capacity
+        
+        # Reset runtime tracking
+        import time
+        self._oil_tracking_active = True
+        self._oil_tracking_start_time = time.time()
+        self._accumulated_work_seconds = 0.0
+        self._completed_cycles = 0
+        self._oil_events = []
+        
+        # Capture baseline
+        if self.data:
+            self._baseline_pump_count = self.data.get("pumpCount", 0)
+        
+        self._log_oil_event("FILL", f"Oil filled to {capacity}ml. Tracking reset.")
+        
+        _LOGGER.info("Oil fill reset for %s. Capacity: %d ml", self.device_id, capacity)
+    
+    def get_oil_status(self):
+        """Get comprehensive oil status for display."""
+        remaining = self.get_estimated_oil_remaining()
+        level_pct = self.get_oil_level_percent()
+        cal = self._oil_calibration
+        
+        return {
+            "bottle_capacity_ml": cal["bottle_capacity"],
+            "fill_volume_ml": cal["fill_volume"],
+            "calibrated": cal["calibrated"],
+            "usage_rate_ml_per_sec": cal["usage_rate"],
+            "usage_rate_ml_per_hour": cal["usage_rate"] * 3600 if cal["usage_rate"] else None,
+            "estimated_remaining_ml": round(remaining, 1) if remaining is not None else None,
+            "level_percent": round(level_pct, 1) if level_pct is not None else None,
+            "runtime_since_fill_sec": self._accumulated_work_seconds,
+            "runtime_since_fill_hours": round(self._accumulated_work_seconds / 3600, 2),
+            "completed_cycles": self._completed_cycles,
+        }
 
     async def fetch_work_time_settings(self, week_day=0):
         """Fetch current work time settings from API."""
@@ -465,17 +822,52 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                         device_data = response_json["data"]
                         is_on = device_data.get("onOff") == 1
                         fan_on = device_data.get("fan") == 1
+                        work_status = device_data.get("workStatus", 0)
+                        pump_count = device_data.get("pumpCount", 0)
+                        
+                        # Get timing values from API
+                        work_remain = device_data.get("workRemainTime", 0) or 0
+                        pause_remain = device_data.get("pauseRemainTime", 0) or 0
+                        
+                        # Get work/pause duration settings
+                        # API may return workSec/pauseSec, or we infer from schedule
+                        work_duration = device_data.get("workSec", self._prev_work_duration)
+                        pause_duration = device_data.get("pauseSec", self._prev_pause_duration)
+                        
+                        # If workStatus=2 and workRemain > stored duration, update it
+                        if work_status == 2 and work_remain > work_duration:
+                            work_duration = work_remain
+                        
+                        # Update oil tracking with cycle detection
+                        self.update_oil_tracking(
+                            device_on=is_on,
+                            work_status=work_status,
+                            work_remain=work_remain,
+                            pause_remain=pause_remain,
+                            work_duration=work_duration,
+                            pause_duration=pause_duration,
+                        )
+                        
+                        # Get comprehensive oil tracking info
+                        oil_info = self.get_oil_tracking_info()
+                        
                         return {
                             "state": is_on,
                             "onOff": device_data.get("onOff"),
                             "fan": device_data.get("fan", 0),
                             "fan_state": fan_on,
-                            "workStatus": device_data.get("workStatus"),
-                            "workRemainTime": device_data.get("workRemainTime"),
-                            "pauseRemainTime": device_data.get("pauseRemainTime"),
+                            "workStatus": work_status,
+                            "workRemainTime": work_remain,
+                            "pauseRemainTime": pause_remain,
+                            "workSec": work_duration,
+                            "pauseSec": pause_duration,
                             "raw_device_data": device_data,
                             "device_id": self.device_id,
-                            "device_name": self.device_name
+                            "device_name": self.device_name,
+                            "pumpCount": pump_count,
+                            "runCount": device_data.get("runCount", 0),
+                            # Oil tracking data
+                            **oil_info,
                         }
                     else:
                         error_msg = response_json.get("msg", "Unknown error")

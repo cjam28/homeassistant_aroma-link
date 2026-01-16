@@ -15,7 +15,9 @@ CONF_DEBUG_LOGGING = "debug_logging"
 DEFAULT_DIFFUSE_TIME = 60  # seconds
 DEFAULT_WORK_DURATION = 10  # seconds
 DEFAULT_PAUSE_DURATION = 900  # seconds (15 minutes)
-DEFAULT_POLL_INTERVAL_MINUTES = 1
+DEFAULT_POLL_INTERVAL_SECONDS = 60  # Default: 60 seconds (1 minute)
+MIN_POLL_INTERVAL_SECONDS = 5  # Minimum: 5 seconds (use with caution!)
+MAX_POLL_INTERVAL_SECONDS = 900  # Maximum: 15 minutes
 DEFAULT_DEBUG_LOGGING = False
 
 # Services

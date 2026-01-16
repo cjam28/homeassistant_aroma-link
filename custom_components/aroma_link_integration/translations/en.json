@@ -18,5 +18,17 @@
     "abort": {
       "already_configured": "This Aroma-Link account is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Aroma-Link Options",
+        "description": "Configure polling and debug settings. ⚠️ Polling under 30 seconds may cause API rate limiting.",
+        "data": {
+          "poll_interval": "Polling Interval (seconds, 5-900)",
+          "debug_logging": "Enable Debug Logging"
+        }
+      }
+    }
   }
 }
