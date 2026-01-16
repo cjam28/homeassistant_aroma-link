@@ -1,6 +1,6 @@
 """Constants for the Aroma-Link integration."""
 
-DOMAIN = "aroma_link_integration_test"
+DOMAIN = "aroma_link_integration"
 
 # Configuration
 CONF_USERNAME = "username"
