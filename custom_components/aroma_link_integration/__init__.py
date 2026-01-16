@@ -222,6 +222,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         _LOGGER.error("Failed to initialize any devices")
         return False
 
+    # Auto-fetch all schedules on startup (for dashboard matrix view)
+    for device_id, coordinator in device_coordinators.items():
+        try:
+            _LOGGER.debug(f"Auto-fetching all schedules for device {device_id}")
+            await coordinator.async_fetch_all_schedules()
+        except Exception as e:
+            _LOGGER.warning(f"Failed to auto-fetch schedules for device {device_id}: {e}")
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "auth_coordinator": auth_coordinator,
@@ -525,6 +533,69 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         SERVICE_SAVE_WORKSET,
         save_workset_service,
         schema=SAVE_WORKSET_SCHEMA
+    )
+
+    # Service: Set editor to specific day/program
+    async def set_editor_program_service(call: ServiceCall):
+        """Set the schedule editor to a specific day and program."""
+        device_id = call.data.get("device_id")
+        day = call.data.get("day", 0)
+        program = call.data.get("program", 1)
+
+        coordinator = None
+        if device_id and device_id in device_coordinators:
+            coordinator = device_coordinators[device_id]
+        elif len(device_coordinators) == 1:
+            coordinator = list(device_coordinators.values())[0]
+        else:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return
+
+        # Refresh schedule for the day first
+        await coordinator.async_refresh_schedule(day)
+        # Set the editor program
+        coordinator.set_editor_program(day, program)
+        _LOGGER.info(f"Set editor to day {day}, program {program} for device {coordinator.device_id}")
+
+    SET_EDITOR_PROGRAM_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+        vol.Optional("day", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
+        vol.Optional("program", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=5)),
+    })
+
+    hass.services.async_register(
+        DOMAIN,
+        "set_editor_program",
+        set_editor_program_service,
+        schema=SET_EDITOR_PROGRAM_SCHEMA
+    )
+
+    # Service: Refresh all schedules (fetch all 7 days)
+    async def refresh_all_schedules_service(call: ServiceCall):
+        """Refresh schedules for all 7 days from the API."""
+        device_id = call.data.get("device_id")
+
+        coordinator = None
+        if device_id and device_id in device_coordinators:
+            coordinator = device_coordinators[device_id]
+        elif len(device_coordinators) == 1:
+            coordinator = list(device_coordinators.values())[0]
+        else:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return
+
+        await coordinator.async_fetch_all_schedules()
+        _LOGGER.info(f"Refreshed all schedules for device {coordinator.device_id}")
+
+    REFRESH_ALL_SCHEDULES_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+    })
+
+    hass.services.async_register(
+        DOMAIN,
+        "refresh_all_schedules",
+        refresh_all_schedules_service,
+        schema=REFRESH_ALL_SCHEDULES_SCHEMA
     )
 
     # Use the new method

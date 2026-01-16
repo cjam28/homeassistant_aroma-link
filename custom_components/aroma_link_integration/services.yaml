@@ -80,3 +80,23 @@ api_diagnostics:
     fire_event:
       description: "Fire an event with the response payload (event type: aroma_link_integration_api_diagnostics)."
       example: true
+
+set_editor_program:
+  description: "Set the schedule editor to a specific day and program. Used by dashboard cards to populate editor entities."
+  fields:
+    device_id:
+      description: "The ID of the device. Required if multiple devices are available."
+      example: "419933"
+    day:
+      description: "Day of week (0=Monday, 1=Tuesday, ..., 6=Sunday). Defaults to 0."
+      example: 0
+    program:
+      description: "Program number (1-5). Defaults to 1."
+      example: 1
+
+refresh_all_schedules:
+  description: "Refresh schedules for all 7 days from the API. Used to populate the full schedule matrix."
+  fields:
+    device_id:
+      description: "The ID of the device. Required if multiple devices are available."
+      example: "419933"

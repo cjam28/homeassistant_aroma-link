@@ -143,25 +143,57 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
     async def async_press(self):
         """Save the program to selected days."""
         program_num = self.coordinator._current_program
+        current_day = self.coordinator._current_day
         selected_days = self.coordinator._selected_days
 
-        # For each selected day, fetch current schedule, replace program, save
-        work_time_lists = {}
+        if not selected_days:
+            _LOGGER.warning("No days selected for saving program")
+            return
+
+        # First, capture the edited program data from the cache (before any API calls)
+        # This is the data the user has edited via the UI entities
+        edited_program = None
+        if current_day in self.coordinator._schedule_cache:
+            current_schedule = self.coordinator._schedule_cache[current_day]
+            if len(current_schedule) >= program_num:
+                edited_program = current_schedule[program_num - 1].copy()
+
+        if not edited_program:
+            _LOGGER.error("No edited program data found in cache for day %s program %s", current_day, program_num)
+            return
+
+        _LOGGER.info(
+            "Saving program %s to days %s with: enabled=%s, time=%s-%s, work=%s, pause=%s, level=%s",
+            program_num, selected_days,
+            edited_program.get("enabled"),
+            edited_program.get("start_time"),
+            edited_program.get("end_time"),
+            edited_program.get("work_sec"),
+            edited_program.get("pause_sec"),
+            edited_program.get("level")
+        )
+
+        # For each selected day, fetch that day's full schedule, merge in edited program, save
         for day in selected_days:
-            # Fetch current schedule for this day
-            schedule = await self.coordinator.async_refresh_schedule(day)
+            # For the current_day, use existing cache; for others, fetch fresh
+            if day == current_day:
+                schedule = self.coordinator._schedule_cache.get(day)
+            else:
+                # Fetch fresh schedule for this day (don't overwrite current_day cache)
+                schedule = await self.coordinator.fetch_workset_for_day(day)
+
             if not schedule:
-                _LOGGER.error("Failed to fetch schedule for day %s", day)
+                _LOGGER.error("Failed to get schedule for day %s", day)
                 continue
 
-            # Replace the selected program in the schedule
+            # Replace the selected program with the edited data
             schedule[program_num - 1] = {
-                "enabled": schedule[program_num - 1].get("enabled", 0),
-                "start_time": schedule[program_num - 1].get("start_time", "00:00"),
-                "end_time": schedule[program_num - 1].get("end_time", "23:59"),
-                "work_sec": schedule[program_num - 1].get("work_sec", 10),
-                "pause_sec": schedule[program_num - 1].get("pause_sec", 120),
-                "level": schedule[program_num - 1].get("level", 1),
+                "enabled": edited_program.get("enabled", 0),
+                "start_time": edited_program.get("start_time", "00:00"),
+                "end_time": edited_program.get("end_time", "23:59"),
+                "work_sec": edited_program.get("work_sec", 10),
+                "pause_sec": edited_program.get("pause_sec", 120),
+                "level": edited_program.get("level", 1),
             }
 
             # Convert to API format
@@ -177,14 +209,17 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
                     "pauseDuration": str(prog.get("pause_sec", 120))
                 })
 
-            work_time_lists[day] = work_time_list
+            # Save this day
+            result = await self.coordinator.set_workset([day], work_time_list)
+            if result:
+                _LOGGER.info("Saved program %s to day %s", program_num, day)
+                # Update cache for this day
+                self.coordinator._schedule_cache[day] = schedule
+            else:
+                _LOGGER.error("Failed to save program %s to day %s", program_num, day)
 
-        # Save to all selected days at once
-        if work_time_lists:
-            first_day = selected_days[0]
-            if first_day in work_time_lists:
-                result = await self.coordinator.set_workset(selected_days, work_time_lists[first_day])
-                if result:
-                    _LOGGER.info("Saved program %s to days %s", program_num, selected_days)
-                else:
-                    _LOGGER.error("Failed to save program %s", program_num)
+        # Refresh the current day to reflect saved changes
+        await self.coordinator.async_refresh_schedule(current_day)
+        self.coordinator.async_update_listeners()
+
+

@@ -132,6 +132,24 @@ Parameters:
 - `log_response`: Log response in Home Assistant logs (optional, defaults to `true`)
 - `fire_event`: Emit event `aroma_link_integration_api_diagnostics` with response payload (optional, defaults to `true`)
 
+### `aroma_link_integration.set_editor_program`
+
+Set the schedule editor to a specific day and program. Used by dashboard cards to populate editor entities when clicking on a schedule cell.
+
+Parameters:
+
+- `device_id`: Device ID (optional, required if you have multiple devices)
+- `day`: Day of week (0=Monday, 1=Tuesday, ..., 6=Sunday). Defaults to 0.
+- `program`: Program number (1-5). Defaults to 1.
+
+### `aroma_link_integration.refresh_all_schedules`
+
+Refresh schedules for all 7 days from the API. Used to populate the full schedule matrix.
+
+Parameters:
+
+- `device_id`: Device ID (optional, required if you have multiple devices)
+
 ## Entities
 
 The integration adds the following entities for each device:
@@ -151,6 +169,7 @@ The integration adds the following entities for each device:
   - Firmware Version (if provided by the API)
   - Last Update (timestamp, if provided by the API)
 - **Schedule Entities** (per-program editor):
+  - Program Day: Select which day's schedule you are viewing/editing
   - Program Selector: Choose which program (1-5) to edit
   - Program Enabled: Enable/disable the selected program
   - Program Start Time: Start time for the program
@@ -161,94 +180,574 @@ The integration adds the following entities for each device:
   - Program Day Switches: 7 switches (one per day) to select which days to apply the program
   - Save Program: Button to save the edited program to selected days
 
-## Dashboard Card (Mushroom)
+## Dashboard Cards (Mushroom)
 
-This card groups the most important controls and schedule editor fields. Replace `device_name` in entity IDs with your actual device name slug.
+### Basic Controls Card
+
+This card groups the most important controls. Replace `device_name` in entity IDs with your actual device name slug (e.g., `pool_house`).
 
 ```yaml
 type: vertical-stack
 cards:
   - type: custom:mushroom-title-card
-    title: Aroma-Link
+    title: Aroma-Link Device
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-entity-card
+        entity: switch.device_name_power
+        name: Power
+        icon_color: green
+      - type: custom:mushroom-entity-card
+        entity: switch.device_name_fan
+        name: Fan
+        icon_color: blue
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-number-card
+        entity: number.device_name_work_duration
+        name: Work (sec)
+      - type: custom:mushroom-number-card
+        entity: number.device_name_pause_duration
+        name: Pause (sec)
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-entity-card
+        entity: button.device_name_run
+        name: Run
+        tap_action:
+          action: call-service
+          service: button.press
+          target:
+            entity_id: button.device_name_run
+      - type: custom:mushroom-entity-card
+        entity: button.device_name_save_settings
+        name: Save Settings
+```
+
+### Schedule Editor Card
+
+This card provides a complete schedule editor interface with program selection, editing fields, and day selection.
+
+```yaml
+type: vertical-stack
+cards:
+  - type: custom:mushroom-title-card
+    title: Schedule Editor
+    subtitle: Select day and program to edit
+  # Day and Program Selectors
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-select-card
+        entity: select.device_name_program_day
+        name: Day
+      - type: custom:mushroom-select-card
+        entity: select.device_name_program
+        name: Program
+  # Program Settings
   - type: custom:mushroom-entity-card
-    entity: switch.aromalink_device_name_power
-    name: Power
-  - type: custom:mushroom-entity-card
-    entity: switch.aromalink_device_name_fan
-    name: Fan
-  - type: custom:mushroom-number-card
-    entity: number.aromalink_device_name_work_duration
-    name: Work Duration
-  - type: custom:mushroom-number-card
-    entity: number.aromalink_device_name_pause_duration
-    name: Pause Duration
-  - type: custom:mushroom-entity-card
-    entity: button.aromalink_device_name_run
-    name: Run
-  - type: custom:mushroom-entity-card
-    entity: button.aromalink_device_name_save_settings
-    name: Save Settings
-  - type: custom:mushroom-select-card
-    entity: select.aromalink_device_name_program
-    name: Program
-  - type: custom:mushroom-entity-card
-    entity: switch.aromalink_device_name_program_enabled
+    entity: switch.device_name_program_enabled
     name: Program Enabled
-  - type: custom:mushroom-entity-card
-    entity: text.aromalink_device_name_program_start_time
-    name: Program Start Time
-  - type: custom:mushroom-entity-card
-    entity: text.aromalink_device_name_program_end_time
-    name: Program End Time
-  - type: custom:mushroom-number-card
-    entity: number.aromalink_device_name_program_work_time
-    name: Program Work Time
-  - type: custom:mushroom-number-card
-    entity: number.aromalink_device_name_program_pause_time
-    name: Program Pause Time
+    icon_color: green
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-entity-card
+        entity: text.device_name_program_start_time
+        name: Start
+      - type: custom:mushroom-entity-card
+        entity: text.device_name_program_end_time
+        name: End
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-number-card
+        entity: number.device_name_program_work_time
+        name: Work (sec)
+      - type: custom:mushroom-number-card
+        entity: number.device_name_program_pause_time
+        name: Pause (sec)
   - type: custom:mushroom-select-card
-    entity: select.aromalink_device_name_program_level
-    name: Program Level
+    entity: select.device_name_program_level
+    name: Level
+  # Day Selection (for saving)
+  - type: custom:mushroom-title-card
+    subtitle: Apply to these days
   - type: horizontal-stack
     cards:
       - type: custom:mushroom-entity-card
-        entity: switch.aromalink_device_name_program_monday
-        name: Mon
+        entity: switch.device_name_program_monday
+        name: M
+        layout: vertical
       - type: custom:mushroom-entity-card
-        entity: switch.aromalink_device_name_program_tuesday
-        name: Tue
+        entity: switch.device_name_program_tuesday
+        name: T
+        layout: vertical
       - type: custom:mushroom-entity-card
-        entity: switch.aromalink_device_name_program_wednesday
-        name: Wed
+        entity: switch.device_name_program_wednesday
+        name: W
+        layout: vertical
       - type: custom:mushroom-entity-card
-        entity: switch.aromalink_device_name_program_thursday
-        name: Thu
-  - type: horizontal-stack
-    cards:
+        entity: switch.device_name_program_thursday
+        name: T
+        layout: vertical
       - type: custom:mushroom-entity-card
-        entity: switch.aromalink_device_name_program_friday
-        name: Fri
+        entity: switch.device_name_program_friday
+        name: F
+        layout: vertical
       - type: custom:mushroom-entity-card
-        entity: switch.aromalink_device_name_program_saturday
-        name: Sat
+        entity: switch.device_name_program_saturday
+        name: S
+        layout: vertical
       - type: custom:mushroom-entity-card
-        entity: switch.aromalink_device_name_program_sunday
-        name: Sun
+        entity: switch.device_name_program_sunday
+        name: S
+        layout: vertical
+  # Save Button
   - type: custom:mushroom-entity-card
-    entity: button.aromalink_device_name_save_program
+    entity: button.device_name_save_program
     name: Save Program
-  - type: custom:mushroom-template-card
-    primary: API Diagnostics (Device Info)
-    secondary: Tap to call /device/deviceInfo/now for this device
-    icon: mdi:bug-outline
-    tap_action:
-      action: call-service
-      service: aroma_link_integration.api_diagnostics
-      data:
-        device_id: "419933"
-        path: "/device/deviceInfo/now/{device_id}"
-        params:
-          timeout: 1000
+    icon_color: amber
+```
+
+### Schedule Matrix View (Interactive)
+
+This card creates a visual matrix showing all 7 days × 5 programs. Click any cell to load that day/program into the editor.
+
+```yaml
+type: vertical-stack
+cards:
+  - type: custom:mushroom-title-card
+    title: Schedule Matrix
+    subtitle: Click a cell to edit that day/program
+  # Row 1: Monday
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Mon
+        layout: vertical
+        icon: mdi:calendar-today
+        icon_color: grey
+      - type: custom:mushroom-template-card
+        primary: "P1"
+        icon: mdi:numeric-1-circle
+        icon_color: green
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 0
+            program: 1
+      - type: custom:mushroom-template-card
+        primary: "P2"
+        icon: mdi:numeric-2-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 0
+            program: 2
+      - type: custom:mushroom-template-card
+        primary: "P3"
+        icon: mdi:numeric-3-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 0
+            program: 3
+      - type: custom:mushroom-template-card
+        primary: "P4"
+        icon: mdi:numeric-4-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 0
+            program: 4
+      - type: custom:mushroom-template-card
+        primary: "P5"
+        icon: mdi:numeric-5-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 0
+            program: 5
+  # Row 2: Tuesday
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Tue
+        layout: vertical
+        icon: mdi:calendar-today
+        icon_color: grey
+      - type: custom:mushroom-template-card
+        primary: "P1"
+        icon: mdi:numeric-1-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 1
+            program: 1
+      - type: custom:mushroom-template-card
+        primary: "P2"
+        icon: mdi:numeric-2-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 1
+            program: 2
+      - type: custom:mushroom-template-card
+        primary: "P3"
+        icon: mdi:numeric-3-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 1
+            program: 3
+      - type: custom:mushroom-template-card
+        primary: "P4"
+        icon: mdi:numeric-4-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 1
+            program: 4
+      - type: custom:mushroom-template-card
+        primary: "P5"
+        icon: mdi:numeric-5-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 1
+            program: 5
+  # Row 3: Wednesday
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Wed
+        layout: vertical
+        icon: mdi:calendar-today
+        icon_color: grey
+      - type: custom:mushroom-template-card
+        primary: "P1"
+        icon: mdi:numeric-1-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 2
+            program: 1
+      - type: custom:mushroom-template-card
+        primary: "P2"
+        icon: mdi:numeric-2-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 2
+            program: 2
+      - type: custom:mushroom-template-card
+        primary: "P3"
+        icon: mdi:numeric-3-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 2
+            program: 3
+      - type: custom:mushroom-template-card
+        primary: "P4"
+        icon: mdi:numeric-4-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 2
+            program: 4
+      - type: custom:mushroom-template-card
+        primary: "P5"
+        icon: mdi:numeric-5-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 2
+            program: 5
+  # Row 4: Thursday
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Thu
+        layout: vertical
+        icon: mdi:calendar-today
+        icon_color: grey
+      - type: custom:mushroom-template-card
+        primary: "P1"
+        icon: mdi:numeric-1-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 3
+            program: 1
+      - type: custom:mushroom-template-card
+        primary: "P2"
+        icon: mdi:numeric-2-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 3
+            program: 2
+      - type: custom:mushroom-template-card
+        primary: "P3"
+        icon: mdi:numeric-3-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 3
+            program: 3
+      - type: custom:mushroom-template-card
+        primary: "P4"
+        icon: mdi:numeric-4-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 3
+            program: 4
+      - type: custom:mushroom-template-card
+        primary: "P5"
+        icon: mdi:numeric-5-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 3
+            program: 5
+  # Row 5: Friday
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Fri
+        layout: vertical
+        icon: mdi:calendar-today
+        icon_color: grey
+      - type: custom:mushroom-template-card
+        primary: "P1"
+        icon: mdi:numeric-1-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 4
+            program: 1
+      - type: custom:mushroom-template-card
+        primary: "P2"
+        icon: mdi:numeric-2-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 4
+            program: 2
+      - type: custom:mushroom-template-card
+        primary: "P3"
+        icon: mdi:numeric-3-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 4
+            program: 3
+      - type: custom:mushroom-template-card
+        primary: "P4"
+        icon: mdi:numeric-4-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 4
+            program: 4
+      - type: custom:mushroom-template-card
+        primary: "P5"
+        icon: mdi:numeric-5-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 4
+            program: 5
+  # Row 6: Saturday
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Sat
+        layout: vertical
+        icon: mdi:calendar-today
+        icon_color: grey
+      - type: custom:mushroom-template-card
+        primary: "P1"
+        icon: mdi:numeric-1-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 5
+            program: 1
+      - type: custom:mushroom-template-card
+        primary: "P2"
+        icon: mdi:numeric-2-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 5
+            program: 2
+      - type: custom:mushroom-template-card
+        primary: "P3"
+        icon: mdi:numeric-3-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 5
+            program: 3
+      - type: custom:mushroom-template-card
+        primary: "P4"
+        icon: mdi:numeric-4-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 5
+            program: 4
+      - type: custom:mushroom-template-card
+        primary: "P5"
+        icon: mdi:numeric-5-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 5
+            program: 5
+  # Row 7: Sunday
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-template-card
+        primary: Sun
+        layout: vertical
+        icon: mdi:calendar-today
+        icon_color: grey
+      - type: custom:mushroom-template-card
+        primary: "P1"
+        icon: mdi:numeric-1-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 6
+            program: 1
+      - type: custom:mushroom-template-card
+        primary: "P2"
+        icon: mdi:numeric-2-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 6
+            program: 2
+      - type: custom:mushroom-template-card
+        primary: "P3"
+        icon: mdi:numeric-3-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 6
+            program: 3
+      - type: custom:mushroom-template-card
+        primary: "P4"
+        icon: mdi:numeric-4-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 6
+            program: 4
+      - type: custom:mushroom-template-card
+        primary: "P5"
+        icon: mdi:numeric-5-circle
+        icon_color: grey
+        tap_action:
+          action: call-service
+          service: aroma_link_integration.set_editor_program
+          data:
+            day: 6
+            program: 5
+```
+
+**How to use the Schedule Matrix:**
+1. All schedule data is automatically loaded on startup
+2. Click any cell (day/program combination) to load that schedule into the editor
+3. The editor entities will update to show the current values for that day/program
+4. Edit the values (enabled, times, work/pause, level)
+5. Toggle the day switches to select which days to apply your changes to
+6. Click "Save Program" to save your changes to the selected days
+
+### Diagnostics Card
+
+```yaml
+type: custom:mushroom-template-card
+primary: API Diagnostics (Device Info)
+secondary: Tap to call /device/deviceInfo/now for this device
+icon: mdi:bug-outline
+tap_action:
+  action: call-service
+  service: aroma_link_integration.api_diagnostics
+  data:
+    device_id: "419933"
+    path: "/device/deviceInfo/now/{device_id}"
+    params:
+      timeout: 1000
 ```
 
 ## Workset Scheduling
@@ -266,10 +765,11 @@ The integration supports full workset scheduling with up to 5 time programs per 
 
 All schedule entities appear on your device page automatically. To edit a schedule:
 
-1. **Select a Program**: Use the "Program" selector to choose which program (1-5) you want to edit
-2. **Edit Program Settings**: Adjust the enabled state, start/end times, work/pause durations, and consistency level
-3. **Select Days**: Toggle the day switches (Monday-Sunday) to choose which days this program should apply to
-4. **Save**: Press the "Save Program" button to apply your changes
+1. **Select a Day**: Use the "Program Day" selector to choose which day’s schedule you want to view/edit
+2. **Select a Program**: Use the "Program" selector to choose which program (1-5) you want to edit
+3. **Edit Program Settings**: Adjust the enabled state, start/end times, work/pause durations, and consistency level
+4. **Select Days**: Toggle the day switches (Monday-Sunday) to choose which days this program should apply to
+5. **Save**: Press the "Save Program" button to apply your changes
 
 The integration automatically:
 - Loads schedules on-demand when you view the device page
@@ -335,6 +835,13 @@ A: Yes! Each day (Monday-Sunday) has its own set of 5 programs. When you edit a 
 
 ## Version History
 
+- **1.5.0** (This fork): Schedule Matrix Dashboard
+  - Added bulk schedule fetch (`refresh_all_schedules` service)
+  - Added `set_editor_program` service for dashboard card integration
+  - Auto-fetch all schedules on startup (no manual refresh needed)
+  - Fixed Save Program button to properly preserve local edits when saving
+  - Enhanced dashboard card examples with interactive 7×5 schedule matrix
+  - Improved cache management to prevent data loss during save operations
 - **1.4.0** (This fork): Diagnostics, metadata sensors, and configurable polling
   - Added configurable polling interval (1–30 minutes)
   - Added optional debug logging toggle

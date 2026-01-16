@@ -86,10 +86,20 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
 
         try:
             _LOGGER.debug(
-                f"Fetching work time settings for device {self.device_id} day {week_day}")
+                "Fetching work time settings for device %s day %s (url=%s)",
+                self.device_id,
+                week_day,
+                url,
+            )
             async with self.auth_coordinator.session.get(url, headers=headers, timeout=15, ssl=VERIFY_SSL) as response:
                 if response.status == 200:
                     response_json = await response.json()
+                    _LOGGER.debug(
+                        "Work time response for device %s day %s: %s",
+                        self.device_id,
+                        week_day,
+                        response_json,
+                    )
 
                     if response_json.get("code") == 200 and "data" in response_json and response_json["data"]:
                         # Find the enabled setting (enabled: 1)
@@ -156,6 +166,67 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             _LOGGER.debug(f"Cached schedule for day {week_day}")
         return workset
 
+    async def async_fetch_all_schedules(self):
+        """Fetch schedules for all 7 days in parallel.
+        
+        Returns:
+            Dict mapping day (0-6) to list of 5 program dictionaries.
+        """
+        _LOGGER.debug(f"Fetching all schedules for device {self.device_id}")
+        
+        # Fetch all 7 days in parallel
+        tasks = [self.fetch_workset_for_day(day) for day in range(7)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results and update cache
+        for day, result in enumerate(results):
+            if isinstance(result, Exception):
+                _LOGGER.error(f"Error fetching day {day}: {result}")
+            elif result:
+                self._schedule_cache[day] = result
+        
+        _LOGGER.info(f"Fetched all schedules for device {self.device_id}: {len(self._schedule_cache)} days cached")
+        return self._schedule_cache.copy()
+
+    def get_schedule_matrix(self):
+        """Return the cached schedule matrix (7 days × 5 programs).
+        
+        Returns:
+            Dict mapping day (0-6) to list of 5 program dictionaries.
+            Days without cached data return None.
+        """
+        return {day: self._schedule_cache.get(day) for day in range(7)}
+
+    def get_current_program_data(self):
+        """Get the current program data from cache for the selected day/program.
+        
+        Returns:
+            Dict with program settings, or None if not cached.
+        """
+        day = self._current_day
+        program = self._current_program
+        if day in self._schedule_cache and self._schedule_cache[day]:
+            programs = self._schedule_cache[day]
+            if 0 < program <= len(programs):
+                return programs[program - 1]
+        return None
+
+    def set_editor_program(self, day, program):
+        """Set the editor to a specific day and program.
+        
+        Args:
+            day: Day of week (0=Monday, 1=Tuesday, ..., 6=Sunday)
+            program: Program number (1-5)
+        """
+        self._current_day = day
+        self._current_program = program
+        # Also update selected_days to include this day by default
+        if day not in self._selected_days:
+            self._selected_days = [day]
+        _LOGGER.debug(f"Set editor to day {day}, program {program}")
+        # Notify listeners
+        self.async_update_listeners()
+
     async def fetch_workset_for_day(self, week_day=0):
         """Fetch full workset (all 5 programs) for a specific day.
         
@@ -182,10 +253,20 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
 
         try:
             _LOGGER.debug(
-                f"Fetching workset for device {self.device_id} day {week_day}")
+                "Fetching workset for device %s day %s (url=%s)",
+                self.device_id,
+                week_day,
+                url,
+            )
             async with self.auth_coordinator.session.get(url, headers=headers, timeout=15, ssl=VERIFY_SSL) as response:
                 if response.status == 200:
                     response_json = await response.json()
+                    _LOGGER.debug(
+                        "Workset response for device %s day %s: %s",
+                        self.device_id,
+                        week_day,
+                        response_json,
+                    )
 
                     if response_json.get("code") == 200 and "data" in response_json and response_json["data"]:
                         workset = []
@@ -215,7 +296,11 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                             })
                         
                         _LOGGER.debug(
-                            f"Fetched workset for day {week_day}: {len(workset)} programs")
+                            "Fetched workset for device %s day %s: %s",
+                            self.device_id,
+                            week_day,
+                            workset,
+                        )
                         return workset
                     else:
                         _LOGGER.warning(
@@ -296,10 +381,19 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
 
         try:
             _LOGGER.debug(
-                f"Setting workset for device {self.device_id} on days {week_days}")
+                "Setting workset for device %s on days %s (payload=%s)",
+                self.device_id,
+                week_days,
+                payload,
+            )
             async with self.auth_coordinator.session.post(url, json=payload, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
                 if response.status == 200:
                     response_json = await response.json()
+                    _LOGGER.debug(
+                        "Workset save response for device %s: %s",
+                        self.device_id,
+                        response_json,
+                    )
                     if response_json.get("code") == 200:
                         _LOGGER.info(
                             f"Successfully set workset for device {self.device_id} to days {week_days}")
@@ -354,10 +448,18 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
 
         try:
             _LOGGER.debug(
-                f"Fetching info for device {self.device_id} from: {url}")
+                "Fetching device info for device %s (url=%s)",
+                self.device_id,
+                url,
+            )
             async with self.auth_coordinator.session.get(url, headers=headers, timeout=15, ssl=VERIFY_SSL) as response:
                 if response.status == 200:
                     response_json = await response.json()
+                    _LOGGER.debug(
+                        "Device info response for device %s: %s",
+                        self.device_id,
+                        response_json,
+                    )
 
                     if response_json.get("code") == 200 and "data" in response_json:
                         device_data = response_json["data"]
@@ -465,8 +567,19 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             headers["Cookie"] = f"languagecode={self.auth_coordinator.language_code}; JSESSIONID={jsessionid}"
 
         try:
+            _LOGGER.debug(
+                "Switch request for device %s (data=%s)",
+                self.device_id,
+                data,
+            )
             async with self.auth_coordinator.session.post(url, data=data, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
                 if response.status == 200:
+                    response_text = await response.text()
+                    _LOGGER.debug(
+                        "Switch response for device %s: %s",
+                        self.device_id,
+                        response_text,
+                    )
                     _LOGGER.info(
                         f"Successfully commanded device {self.device_id} to {'on' if state_to_set else 'off'}")
                     await self.async_request_refresh()
@@ -507,8 +620,19 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             headers["Cookie"] = f"languagecode={self.auth_coordinator.language_code}; JSESSIONID={jsessionid}"
 
         try:
+            _LOGGER.debug(
+                "Fan request for device %s (data=%s)",
+                self.device_id,
+                data,
+            )
             async with self.auth_coordinator.session.post(url, data=data, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
                 if response.status == 200:
+                    response_text = await response.text()
+                    _LOGGER.debug(
+                        "Fan response for device %s: %s",
+                        self.device_id,
+                        response_text,
+                    )
                     _LOGGER.info(
                         f"Successfully commanded fan for device {self.device_id} to {'on' if state_to_set else 'off'}")
                     await self.async_request_refresh()
@@ -599,8 +723,19 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             headers["Cookie"] = f"languagecode={self.auth_coordinator.language_code}; JSESSIONID={jsessionid}"
 
         try:
+            _LOGGER.debug(
+                "Scheduler request for device %s (payload=%s)",
+                self.device_id,
+                payload,
+            )
             async with self.auth_coordinator.session.post(url, json=payload, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
                 if response.status == 200:
+                    response_text = await response.text()
+                    _LOGGER.debug(
+                        "Scheduler response for device %s: %s",
+                        self.device_id,
+                        response_text,
+                    )
                     _LOGGER.info(
                         f"Successfully set scheduler for device {self.device_id}")
                     await self.async_request_refresh()
