@@ -24,3 +24,6 @@ ATTR_DIFFUSE_TIME = "diffuse_time"
 ATTR_WORK_DURATION = "work_duration"
 ATTR_PAUSE_DURATION = "pause_duration"
 ATTR_WEEK_DAYS = "week_days"
+
+# SSL Configuration
+VERIFY_SSL = False  # Set to False to bypass SSL certificate verification for Aroma-Link API

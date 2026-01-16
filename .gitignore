@@ -120,3 +120,17 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Workspace files
+*.code-workspace
+
+# Project documentation (local notes)
+Project Docs/
+
+# Cursor IDE
+.cursor/
+.cursorignore
+.cursorindexingignore
+derived-cursor-rules.mdc
+derived-cursor-rules.mdc.*
+.specstory/
