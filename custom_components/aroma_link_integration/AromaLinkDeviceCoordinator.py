@@ -119,6 +119,172 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 f"Error fetching work time settings for device {self.device_id}: {e}")
             return None
 
+    async def fetch_workset_for_day(self, week_day=0):
+        """Fetch full workset (all 5 programs) for a specific day.
+        
+        Args:
+            week_day: Day of week (0=Monday, 1=Tuesday, ..., 6=Sunday)
+            
+        Returns:
+            List of 5 program dictionaries with keys: enabled, start_time, end_time, 
+            work_sec, pause_sec, level, setting_id. Returns None on error.
+        """
+        await self.auth_coordinator._ensure_login()
+        jsessionid = self.auth_coordinator.jsessionid
+
+        url = f"https://www.aroma-link.com/device/workTime/{self.device_id}?week={week_day}"
+
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://www.aroma-link.com",
+            "Referer": f"https://www.aroma-link.com/device/command/{self.device_id}",
+        }
+
+        if jsessionid and not jsessionid.startswith("temp_"):
+            headers["Cookie"] = f"languagecode={self.auth_coordinator.language_code}; JSESSIONID={jsessionid}"
+
+        try:
+            _LOGGER.debug(
+                f"Fetching workset for device {self.device_id} day {week_day}")
+            async with self.auth_coordinator.session.get(url, headers=headers, timeout=15, ssl=VERIFY_SSL) as response:
+                if response.status == 200:
+                    response_json = await response.json()
+
+                    if response_json.get("code") == 200 and "data" in response_json and response_json["data"]:
+                        workset = []
+                        # API returns up to 5 programs, ensure we have exactly 5
+                        data = response_json["data"]
+                        for i, setting in enumerate(data[:5]):  # Limit to 5
+                            workset.append({
+                                "enabled": setting.get("enabled", 0),
+                                "start_time": setting.get("startHour", "00:00"),
+                                "end_time": setting.get("endHour", "23:59"),
+                                "work_sec": setting.get("workSec", 10),
+                                "pause_sec": setting.get("pauseSec", 120),
+                                "level": setting.get("consistenceLevel", 1),
+                                "setting_id": setting.get("settingId"),
+                            })
+                        
+                        # Pad to 5 if fewer returned
+                        while len(workset) < 5:
+                            workset.append({
+                                "enabled": 0,
+                                "start_time": "00:00",
+                                "end_time": "23:59",
+                                "work_sec": 10,
+                                "pause_sec": 120,
+                                "level": 1,
+                                "setting_id": None,
+                            })
+                        
+                        _LOGGER.debug(
+                            f"Fetched workset for day {week_day}: {len(workset)} programs")
+                        return workset
+                    else:
+                        _LOGGER.warning(
+                            f"No workset data found for device {self.device_id} day {week_day}")
+                        # Return empty workset (5 disabled programs)
+                        return [
+                            {"enabled": 0, "start_time": "00:00", "end_time": "23:59", 
+                             "work_sec": 10, "pause_sec": 120, "level": 1, "setting_id": None}
+                            for _ in range(5)
+                        ]
+                elif response.status in [401, 403]:
+                    _LOGGER.warning(
+                        f"Authentication error on fetch_workset_for_day ({response.status}).")
+                    self.auth_coordinator.jsessionid = None
+                    return None
+                else:
+                    _LOGGER.error(
+                        f"Failed to fetch workset for device {self.device_id}: {response.status}")
+                    return None
+        except Exception as e:
+            _LOGGER.error(
+                f"Error fetching workset for device {self.device_id}: {e}")
+            return None
+
+    async def set_workset(self, week_days, work_time_list):
+        """Set workset schedule for specified days.
+        
+        Args:
+            week_days: List of day numbers (0=Monday, 1=Tuesday, ..., 6=Sunday)
+            work_time_list: List of 5 program dictionaries, each with:
+                - enabled: 0 or 1
+                - startTime: "HH:MM" format
+                - endTime: "HH:MM" format
+                - workDuration: string (seconds)
+                - pauseDuration: string (seconds)
+                - consistenceLevel: "1", "2", or "3" (A, B, or C)
+                
+        Returns:
+            True if successful, False otherwise
+        """
+        await self.auth_coordinator._ensure_login()
+        jsessionid = self.auth_coordinator.jsessionid
+
+        url = "https://www.aroma-link.com/device/workSet"
+
+        # Ensure we have exactly 5 programs
+        if len(work_time_list) < 5:
+            # Pad with disabled programs
+            work_time_list = list(work_time_list)
+            while len(work_time_list) < 5:
+                work_time_list.append({
+                    "startTime": "00:00",
+                    "endTime": "23:59",
+                    "enabled": 0,
+                    "consistenceLevel": "1",
+                    "workDuration": "10",
+                    "pauseDuration": "120"
+                })
+        elif len(work_time_list) > 5:
+            work_time_list = work_time_list[:5]
+
+        payload = {
+            "deviceId": str(self.device_id),
+            "type": "workTime",
+            "week": week_days,
+            "workTimeList": work_time_list
+        }
+
+        headers = {
+            "Content-Type": "application/json;charset=UTF-8",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://www.aroma-link.com",
+            "Referer": f"https://www.aroma-link.com/device/command/{self.device_id}",
+        }
+
+        if jsessionid and not jsessionid.startswith("temp_"):
+            headers["Cookie"] = f"languagecode={self.auth_coordinator.language_code}; JSESSIONID={jsessionid}"
+
+        try:
+            _LOGGER.debug(
+                f"Setting workset for device {self.device_id} on days {week_days}")
+            async with self.auth_coordinator.session.post(url, json=payload, headers=headers, timeout=10, ssl=VERIFY_SSL) as response:
+                if response.status == 200:
+                    response_json = await response.json()
+                    if response_json.get("code") == 200:
+                        _LOGGER.info(
+                            f"Successfully set workset for device {self.device_id}")
+                        await self.async_request_refresh()
+                        return True
+                    else:
+                        _LOGGER.error(
+                            f"API error setting workset: {response_json.get('msg', 'Unknown error')}")
+                        return False
+                elif response.status in [401, 403]:
+                    _LOGGER.warning(
+                        f"Authentication error on set_workset ({response.status}).")
+                    self.auth_coordinator.jsessionid = None
+                    return False
+                else:
+                    _LOGGER.error(
+                        f"Failed to set workset for device {self.device_id}: {response.status}")
+                    return False
+        except Exception as e:
+            _LOGGER.error(f"Error setting workset for device {self.device_id}: {e}")
+            return False
+
     def get_device_info(self):
         """Get device info for entity setup."""
         return {
