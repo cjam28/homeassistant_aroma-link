@@ -1,6 +1,5 @@
 """The Aroma-Link integration."""
 import logging
-from datetime import timedelta
 
 from .AromaLinkAuthCoordinator import AromaLinkAuthCoordinator
 from .AromaLinkDeviceCoordinator import AromaLinkDeviceCoordinator
@@ -15,6 +14,10 @@ import voluptuous as vol
 from .const import (
     DOMAIN,
     CONF_DEVICE_ID,
+    CONF_POLL_INTERVAL,
+    CONF_DEBUG_LOGGING,
+    DEFAULT_POLL_INTERVAL_MINUTES,
+    DEFAULT_DEBUG_LOGGING,
     SERVICE_SET_SCHEDULER,
     SERVICE_RUN_DIFFUSER,
     SERVICE_LOAD_WORKSET,
@@ -41,6 +44,17 @@ RUN_DIFFUSER_SCHEMA = vol.Schema({
     vol.Optional(ATTR_WORK_DURATION): vol.All(vol.Coerce(int), vol.Range(min=5, max=900)),
     vol.Optional(ATTR_PAUSE_DURATION): vol.All(vol.Coerce(int), vol.Range(min=5, max=900)),
     vol.Optional("device_id"): cv.string,
+})
+
+API_DIAGNOSTICS_SCHEMA = vol.Schema({
+    vol.Required("path"): cv.string,
+    vol.Optional("method", default="GET"): vol.In(["GET", "POST"]),
+    vol.Optional("device_id"): cv.string,
+    vol.Optional("params"): dict,
+    vol.Optional("data"): dict,
+    vol.Optional("json"): dict,
+    vol.Optional("log_response", default=True): cv.boolean,
+    vol.Optional("fire_event", default=True): cv.boolean,
 })
 
 
@@ -123,6 +137,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     return unload_ok
 
 
+def _apply_debug_logging(entry: ConfigEntry) -> None:
+    """Apply debug logging based on the config entry options."""
+    debug_enabled = entry.options.get(CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING)
+    level = logging.DEBUG if debug_enabled else logging.INFO
+    logging.getLogger("custom_components.aroma_link_integration").setLevel(level)
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options updates."""
+    _apply_debug_logging(entry)
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up Aroma-Link from a config entry."""
     username = entry.data[CONF_USERNAME]
@@ -142,6 +169,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     _LOGGER.info(
         f"Setting up Aroma-Link integration with {len(devices)} devices")
 
+    _apply_debug_logging(entry)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
     # Create a single shared coordinator for authentication
     auth_coordinator = AromaLinkAuthCoordinator(
         hass,
@@ -155,6 +185,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Store coordinators for each device
     device_coordinators = {}
 
+    poll_interval = entry.options.get(
+        CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_MINUTES
+    )
+
     # Create coordinator for each device
     for device in devices:
         device_id = device[CONF_DEVICE_ID]
@@ -167,7 +201,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             hass,
             auth_coordinator=auth_coordinator,
             device_id=device_id,
-            device_name=device_name
+            device_name=device_name,
+            update_interval_minutes=poll_interval,
         )
 
         # Do first refresh for each device
@@ -239,6 +274,73 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         SERVICE_RUN_DIFFUSER,
         run_diffuser_service,
         schema=RUN_DIFFUSER_SCHEMA
+    )
+
+    async def api_diagnostics_service(call: ServiceCall):
+        """Call arbitrary API endpoints for diagnostics."""
+        device_id = call.data.get("device_id")
+        path = call.data.get("path")
+        method = call.data.get("method", "GET").upper()
+        params = call.data.get("params")
+        data = call.data.get("data")
+        json_body = call.data.get("json")
+        log_response = call.data.get("log_response", True)
+        fire_event = call.data.get("fire_event", True)
+
+        if not path.startswith("/"):
+            path = f"/{path}"
+
+        if device_id and "{device_id}" in path:
+            path = path.format(device_id=device_id)
+
+        url = f"https://www.aroma-link.com{path}"
+
+        coordinator = None
+        if device_id and device_id in device_coordinators:
+            coordinator = device_coordinators[device_id]
+        elif len(device_coordinators) == 1:
+            coordinator = list(device_coordinators.values())[0]
+
+        if coordinator is None:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return
+
+        try:
+            response_data = await coordinator.api_request(
+                url=url,
+                method=method,
+                params=params,
+                data=data,
+                json_body=json_body,
+            )
+        except Exception as exc:
+            _LOGGER.error(f"API diagnostics call failed: {exc}")
+            return
+
+        if log_response:
+            _LOGGER.info(
+                "API diagnostics response (%s %s): %s",
+                method,
+                url,
+                response_data,
+            )
+
+        if fire_event:
+            hass.bus.async_fire(
+                f"{DOMAIN}_api_diagnostics",
+                {
+                    "device_id": device_id,
+                    "method": method,
+                    "url": url,
+                    "response": response_data,
+                },
+            )
+
+    hass.services.async_register(
+        DOMAIN,
+        "api_diagnostics",
+        api_diagnostics_service,
+        schema=API_DIAGNOSTICS_SCHEMA,
     )
 
     async def load_workset_service(call: ServiceCall):

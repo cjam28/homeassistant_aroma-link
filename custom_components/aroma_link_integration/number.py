@@ -183,12 +183,13 @@ class AromaLinkProgramWorkDuration(NumberEntity):
         self._coordinator = coordinator
         self._entry = entry
         self._device_id = device_id
-        self._name = f"{device_name} Program Work Duration"
+        self._name = f"{device_name} Program Work Time"
         self._unique_id = f"{entry.data['username']}_{device_id}_program_work_duration"
         self._attr_native_min_value = 5
         self._attr_native_max_value = 900
         self._attr_native_step = 1
         self._attr_native_unit_of_measurement = "sec"
+        self._attr_mode = "box"
 
     @property
     def name(self):
@@ -242,12 +243,13 @@ class AromaLinkProgramPauseDuration(NumberEntity):
         self._coordinator = coordinator
         self._entry = entry
         self._device_id = device_id
-        self._name = f"{device_name} Program Pause Duration"
+        self._name = f"{device_name} Program Pause Time"
         self._unique_id = f"{entry.data['username']}_{device_id}_program_pause_duration"
         self._attr_native_min_value = 5
         self._attr_native_max_value = 900
         self._attr_native_step = 5
         self._attr_native_unit_of_measurement = "sec"
+        self._attr_mode = "box"
 
     @property
     def name(self):

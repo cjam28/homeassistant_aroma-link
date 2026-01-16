@@ -52,3 +52,31 @@ save_workset:
     helper_prefix:
       description: "Prefix for helper entity IDs (e.g., 'aromalink_poolhouse'). Automatically created during setup if not provided."
       example: "aromalink_poolhouse"
+
+api_diagnostics:
+  description: "Call an Aroma-Link API endpoint for diagnostics and fire a response event."
+  fields:
+    path:
+      description: "API path to call (e.g., /device/deviceInfo/now/{device_id})."
+      example: "/device/deviceInfo/now/{device_id}"
+    method:
+      description: "HTTP method to use (GET or POST)."
+      example: "GET"
+    device_id:
+      description: "Device ID to substitute into {device_id} in the path or select a specific device."
+      example: "419933"
+    params:
+      description: "Optional query parameters to include in the request."
+      example: {"timeout": 1000}
+    data:
+      description: "Optional form data body for POST requests."
+      example: {"deviceId": "419933", "fan": 1}
+    json:
+      description: "Optional JSON body for POST requests."
+      example: {"deviceId": "419933", "week": [0]}
+    log_response:
+      description: "Log the response in Home Assistant logs."
+      example: true
+    fire_event:
+      description: "Fire an event with the response payload (event type: aroma_link_integration_api_diagnostics)."
+      example: true

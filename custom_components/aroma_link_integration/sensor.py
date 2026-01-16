@@ -1,9 +1,10 @@
 """Sensor platform for Aroma-Link."""
 import logging
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.const import UnitOfTime
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 
@@ -24,6 +25,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
         entities.append(AromaLinkPauseRemainingTimeSensor(coordinator, entry, device_id, device_info["name"]))
         entities.append(AromaLinkOnCountSensor(coordinator, entry, device_id, device_info["name"]))
         entities.append(AromaLinkPumpCountSensor(coordinator, entry, device_id, device_info["name"]))
+        entities.append(AromaLinkSignalStrengthSensor(coordinator, entry, device_id, device_info["name"]))
+        entities.append(AromaLinkFirmwareVersionSensor(coordinator, entry, device_id, device_info["name"]))
+        entities.append(AromaLinkLastUpdateSensor(coordinator, entry, device_id, device_info["name"]))
     
     async_add_entities(entities)
 
@@ -60,6 +64,31 @@ class AromaLinkSensorBase(CoordinatorEntity, SensorEntity):
             manufacturer="Aroma-Link",
             model="Diffuser",
         )
+
+
+def _get_first_value(raw_data, keys):
+    """Return the first non-None value for the provided keys."""
+    for key in keys:
+        if key in raw_data and raw_data.get(key) is not None:
+            return raw_data.get(key)
+    return None
+
+
+def _parse_timestamp(value):
+    """Parse a timestamp in seconds or milliseconds to a datetime."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError:
+            return None
+    if isinstance(value, (int, float)):
+        if value > 1_000_000_000_000:
+            value = value / 1000.0
+        if value > 1_000_000_000:
+            return dt_util.utc_from_timestamp(value)
+    return None
 
 class AromaLinkWorkStatusSensor(AromaLinkSensorBase):
     """Sensor showing the current work status."""
@@ -169,3 +198,81 @@ class AromaLinkPumpCountSensor(AromaLinkSensorBase):
         """Return the pump count value."""
         raw_data = self.coordinator.data.get("raw_device_data", {})
         return raw_data.get("pumpCount")
+
+
+class AromaLinkSignalStrengthSensor(AromaLinkSensorBase):
+    """Sensor showing signal strength (if provided by the API)."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the signal strength sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            device_id,
+            device_name,
+            "Signal Strength",
+            icon="mdi:wifi",
+        )
+
+    @property
+    def native_value(self):
+        """Return the signal strength value."""
+        raw_data = self.coordinator.data.get("raw_device_data", {})
+        value = _get_first_value(
+            raw_data,
+            ["rssi", "signalStrength", "signal", "signalLevel", "wifiSignal", "wifiLevel"],
+        )
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value)
+        return value
+
+
+class AromaLinkFirmwareVersionSensor(AromaLinkSensorBase):
+    """Sensor showing firmware version (if provided by the API)."""
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the firmware version sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            device_id,
+            device_name,
+            "Firmware Version",
+            icon="mdi:chip",
+        )
+
+    @property
+    def native_value(self):
+        """Return the firmware version value."""
+        raw_data = self.coordinator.data.get("raw_device_data", {})
+        return _get_first_value(
+            raw_data,
+            ["firmwareVersion", "firmware", "fwVersion", "deviceVersion", "version"],
+        )
+
+
+class AromaLinkLastUpdateSensor(AromaLinkSensorBase):
+    """Sensor showing the last update timestamp (if provided by the API)."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator, entry, device_id, device_name):
+        """Initialize the last update sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            device_id,
+            device_name,
+            "Last Update",
+            icon="mdi:clock-outline",
+        )
+
+    @property
+    def native_value(self):
+        """Return the last update timestamp."""
+        raw_data = self.coordinator.data.get("raw_device_data", {})
+        value = _get_first_value(
+            raw_data,
+            ["updateTime", "lastUpdate", "lastUpdateTime", "update_time", "updateTimestamp"],
+        )
+        return _parse_timestamp(value)

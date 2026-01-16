@@ -15,6 +15,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     for device_id, coordinator in device_coordinators.items():
         device_info = coordinator.get_device_info()
         device_name = device_info["name"]
+        # Load current day schedule on startup for immediate visibility
+        await coordinator.async_refresh_schedule(coordinator._current_day)
         entities.append(AromaLinkProgramSelector(coordinator, entry, device_id, device_name))
         entities.append(AromaLinkProgramLevel(coordinator, entry, device_id, device_name))
 
@@ -68,11 +70,10 @@ class AromaLinkProgramSelector(CoordinatorEntity, SelectEntity):
         """Select a program."""
         self._current_program = int(option)
         self.coordinator._current_program = int(option)
-        # Trigger update of editor entities
-        self.async_write_ha_state()
-        # Load schedule for current day if not cached
-        if self.coordinator._current_day not in self.coordinator._schedule_cache:
-            await self.coordinator.async_refresh_schedule(self.coordinator._current_day)
+        # Always refresh current day to reflect app changes
+        await self.coordinator.async_refresh_schedule(self.coordinator._current_day)
+        # Notify all listeners so other entities update
+        self.coordinator.async_update_listeners()
 
 
 class AromaLinkProgramLevel(CoordinatorEntity, SelectEntity):

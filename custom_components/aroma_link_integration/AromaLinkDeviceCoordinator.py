@@ -16,7 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
     """Coordinator for handling device data and control."""
 
-    def __init__(self, hass, auth_coordinator, device_id, device_name):
+    def __init__(self, hass, auth_coordinator, device_id, device_name, update_interval_minutes=1):
         """Initialize the device coordinator."""
         self.hass = hass
         self.auth_coordinator = auth_coordinator
@@ -35,7 +35,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=f"{DOMAIN}_{device_id}",
-            update_interval=timedelta(minutes=1),
+            update_interval=timedelta(minutes=update_interval_minutes),
         )
 
     @property
@@ -393,6 +393,54 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
         except Exception as e:
             _LOGGER.error(f"Error fetching device {self.device_id} info: {e}")
             raise UpdateFailed(f"Error: {e}")
+
+    async def api_request(self, url, method="GET", params=None, data=None, json_body=None):
+        """Make an authenticated API request for diagnostics/testing."""
+        await self.auth_coordinator._ensure_login()
+        jsessionid = self.auth_coordinator.jsessionid
+
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://www.aroma-link.com",
+            "Referer": f"https://www.aroma-link.com/device/command/{self.device_id}",
+        }
+
+        if jsessionid and not jsessionid.startswith("temp_"):
+            headers["Cookie"] = (
+                f"languagecode={self.auth_coordinator.language_code}; JSESSIONID={jsessionid}"
+            )
+
+        if json_body is not None:
+            headers["Content-Type"] = "application/json"
+        elif data is not None:
+            headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+
+        _LOGGER.debug("API diagnostics request: %s %s", method, url)
+
+        async with self.auth_coordinator.session.request(
+            method=method,
+            url=url,
+            params=params,
+            data=data,
+            json=json_body,
+            timeout=15,
+            ssl=VERIFY_SSL,
+            headers=headers,
+        ) as response:
+            content_type = response.headers.get("Content-Type", "")
+            response_text = await response.text()
+
+            try:
+                response_json = await response.json()
+            except Exception:
+                response_json = None
+
+            return {
+                "status": response.status,
+                "content_type": content_type,
+                "json": response_json,
+                "text": response_text if response_json is None else None,
+            }
 
     async def turn_on_off(self, state_to_set):
         """Turn the diffuser on or off."""

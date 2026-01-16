@@ -190,7 +190,7 @@ class AromaLinkProgramDaySwitch(CoordinatorEntity, SwitchEntity):
         self._device_id = device_id
         self._day_num = day_num
         self._day_name = day_name
-        self._name = f"{device_name} Program Day {day_name}"
+        self._name = f"{device_name} Program {day_name}"
         self._unique_id = f"{entry.data['username']}_{device_id}_program_day_{day_num}"
 
     @property

@@ -17,6 +17,9 @@ This custom component provides integration with Aroma-Link WiFi diffusers in Hom
 - Run diffuser for specific durations
 - Automatic device discovery
 - Auto-detection of devices in your Aroma-Link account
+- Configurable polling interval (1–30 minutes)
+- Optional debug logging toggle
+- Diagnostics API tester service
 
 ## Installation
 
@@ -63,6 +66,13 @@ This custom component provides integration with Aroma-Link WiFi diffusers in Hom
 4. Enter your Aroma-Link username and password
 5. The integration will automatically discover and add all devices in your account
 
+### Options
+
+After setup, open the integration options to configure:
+
+- Polling interval (1–30 minutes)
+- Debug logging toggle
+
 ## Services
 
 The integration provides the following services:
@@ -107,6 +117,21 @@ Parameters:
 - `week_days`: List of weekdays to apply schedule to (0=Monday, 1=Tuesday, ..., 6=Sunday). Required.
 - `helper_prefix`: Prefix for helper entity IDs (e.g., "aromalink_poolhouse"). If not provided, uses device name.
 
+### `aroma_link_integration.api_diagnostics`
+
+Call a specific Aroma-Link API endpoint for discovery/diagnostics and optionally emit an event with the response.
+
+Parameters:
+
+- `path`: API path (e.g., `/device/deviceInfo/now/{device_id}`) (required)
+- `method`: `GET` or `POST` (optional, defaults to `GET`)
+- `device_id`: Device ID (optional, required if you have multiple devices)
+- `params`: Query parameters (optional)
+- `data`: Form body for POST (optional)
+- `json`: JSON body for POST (optional)
+- `log_response`: Log response in Home Assistant logs (optional, defaults to `true`)
+- `fire_event`: Emit event `aroma_link_integration_api_diagnostics` with response payload (optional, defaults to `true`)
+
 ## Entities
 
 The integration adds the following entities for each device:
@@ -122,6 +147,9 @@ The integration adds the following entities for each device:
   - Pause Remaining Time (seconds)
   - On Count (total activations)
   - Pump Count (total diffusions)
+  - Signal Strength (if provided by the API)
+  - Firmware Version (if provided by the API)
+  - Last Update (timestamp, if provided by the API)
 - **Schedule Entities** (per-program editor):
   - Program Selector: Choose which program (1-5) to edit
   - Program Enabled: Enable/disable the selected program
@@ -132,6 +160,84 @@ The integration adds the following entities for each device:
   - Program Level: Consistency level (A/B/C)
   - Program Day Switches: 7 switches (one per day) to select which days to apply the program
   - Save Program: Button to save the edited program to selected days
+
+## Dashboard Card (Mushroom)
+
+This card groups the most important controls and schedule editor fields. Replace `device_name` in entity IDs with your actual device name slug.
+
+```yaml
+type: vertical-stack
+cards:
+  - type: custom:mushroom-title-card
+    title: Aroma-Link
+  - type: custom:mushroom-entity-card
+    entity: switch.aromalink_device_name_power
+    name: Power
+  - type: custom:mushroom-entity-card
+    entity: switch.aromalink_device_name_fan
+    name: Fan
+  - type: custom:mushroom-number-card
+    entity: number.aromalink_device_name_work_duration
+    name: Work Duration
+  - type: custom:mushroom-number-card
+    entity: number.aromalink_device_name_pause_duration
+    name: Pause Duration
+  - type: custom:mushroom-entity-card
+    entity: button.aromalink_device_name_run
+    name: Run
+  - type: custom:mushroom-entity-card
+    entity: button.aromalink_device_name_save_settings
+    name: Save Settings
+  - type: custom:mushroom-select-card
+    entity: select.aromalink_device_name_program
+    name: Program
+  - type: custom:mushroom-entity-card
+    entity: switch.aromalink_device_name_program_enabled
+    name: Program Enabled
+  - type: custom:mushroom-entity-card
+    entity: text.aromalink_device_name_program_start_time
+    name: Program Start Time
+  - type: custom:mushroom-entity-card
+    entity: text.aromalink_device_name_program_end_time
+    name: Program End Time
+  - type: custom:mushroom-number-card
+    entity: number.aromalink_device_name_program_work_time
+    name: Program Work Time
+  - type: custom:mushroom-number-card
+    entity: number.aromalink_device_name_program_pause_time
+    name: Program Pause Time
+  - type: custom:mushroom-select-card
+    entity: select.aromalink_device_name_program_level
+    name: Program Level
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-entity-card
+        entity: switch.aromalink_device_name_program_monday
+        name: Mon
+      - type: custom:mushroom-entity-card
+        entity: switch.aromalink_device_name_program_tuesday
+        name: Tue
+      - type: custom:mushroom-entity-card
+        entity: switch.aromalink_device_name_program_wednesday
+        name: Wed
+      - type: custom:mushroom-entity-card
+        entity: switch.aromalink_device_name_program_thursday
+        name: Thu
+  - type: horizontal-stack
+    cards:
+      - type: custom:mushroom-entity-card
+        entity: switch.aromalink_device_name_program_friday
+        name: Fri
+      - type: custom:mushroom-entity-card
+        entity: switch.aromalink_device_name_program_saturday
+        name: Sat
+      - type: custom:mushroom-entity-card
+        entity: switch.aromalink_device_name_program_sunday
+        name: Sun
+  - type: custom:mushroom-entity-card
+    entity: button.aromalink_device_name_save_program
+    name: Save Program
+```
 
 ## Workset Scheduling
 
@@ -188,12 +294,13 @@ The new auto-discovery feature eliminates the need to manually find your device 
 - All communication is done over HTTPS (encrypted but SSL certificate verification is disabled)
 - **SSL Verification Bypass**: This fork sets `VERIFY_SSL = False` to bypass certificate validation, allowing the integration to work even when Aroma-Link's SSL certificates are expired or invalid
 - Session management is handled with cookies and automatic re-login when needed
-- **Important**: The integration polls device state (power, fan, sensors) every 1 minute. Schedule data is loaded on-demand when viewing the device page or when explicitly refreshed. This means any changes made outside of Home Assistant (e.g., via the Aroma-Link mobile app or website) will be reflected in Home Assistant within 1 minute for device state, or immediately when you view/edit schedules.
+- **Important**: The integration polls device state (power, fan, sensors) every 1 minute by default. You can change this in the integration options (1–30 minutes). Schedule data is loaded on-demand when viewing the device page or when explicitly refreshed. This means any changes made outside of Home Assistant (e.g., via the Aroma-Link mobile app or website) will be reflected in Home Assistant within the configured interval for device state, or immediately when you view/edit schedules.
 
 ## Troubleshooting
 
 - If you have issues connecting, verify that your Aroma-Link credentials are correct
 - Check the Home Assistant logs for debugging information
+- Enable debug logging in the integration options if you need more detail
 - Make sure your diffuser is connected to your WiFi network and accessible from the internet
 - If automatic device discovery fails, you can still manually specify your device ID
 
@@ -209,13 +316,18 @@ A: Make sure your diffuser is connected to WiFi and properly set up in the Aroma
 A: You don't need to! The integration automatically discovers your devices and lets you select which one to use from a list.
 
 **Q: What happens if I change settings in the Aroma-Link app?**  
-A: The integration polls device state every 1 minute, so power/fan changes will be reflected within 1 minute. Schedule changes are loaded on-demand when you view the device page or refresh the schedule.
+A: The integration polls device state on a configurable interval (default 1 minute), so power/fan changes will be reflected within that interval. Schedule changes are loaded on-demand when you view the device page or refresh the schedule.
 
 **Q: Can I set different schedules for different days of the week?**  
 A: Yes! Each day (Monday-Sunday) has its own set of 5 programs. When you edit a program and save it, you can select which days to apply it to. The integration automatically merges your edited program into the full 5-program set for each selected day.
 
 ## Version History
 
+- **1.4.0** (This fork): Diagnostics, metadata sensors, and configurable polling
+  - Added configurable polling interval (1–30 minutes)
+  - Added optional debug logging toggle
+  - Added diagnostics API tester service with event output
+  - Added metadata sensors (signal strength, firmware version, last update)
 - **1.3.0** (This fork): Native schedule entities and fan control
   - Replaced helper-based system with native Home Assistant entities
   - Added fan switch entity for fan on/off control

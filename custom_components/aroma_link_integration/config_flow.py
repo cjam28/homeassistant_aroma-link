@@ -6,7 +6,17 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import aiohttp
 
-from .const import DOMAIN, CONF_USERNAME, CONF_PASSWORD, CONF_DEVICE_ID, VERIFY_SSL
+from .const import (
+    DOMAIN,
+    CONF_USERNAME,
+    CONF_PASSWORD,
+    CONF_DEVICE_ID,
+    CONF_POLL_INTERVAL,
+    CONF_DEBUG_LOGGING,
+    DEFAULT_POLL_INTERVAL_MINUTES,
+    DEFAULT_DEBUG_LOGGING,
+    VERIFY_SSL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,6 +92,43 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        """Get the options flow for this handler."""
+        return AromaLinkOptionsFlowHandler(config_entry)
+
+
+class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle Aroma-Link options."""
+
+    def __init__(self, config_entry):
+        """Initialize options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self._config_entry.options
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_POLL_INTERVAL,
+                        default=options.get(
+                            CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_MINUTES
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=30)),
+                    vol.Optional(
+                        CONF_DEBUG_LOGGING,
+                        default=options.get(CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING),
+                    ): bool,
+                }
+            ),
         )
         
     async def _authenticate(self, username, password):
