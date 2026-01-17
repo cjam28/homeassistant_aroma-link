@@ -1,5 +1,5 @@
 /**
- * Aroma-Link Schedule Card v2.6.0
+ * Aroma-Link Schedule Card v2.6.1
  * 
  * A complete dashboard card for Aroma-Link diffusers including:
  * - Compact manual controls (Power applies work/pause, Fan, Timed Run)
@@ -11,6 +11,7 @@
  * - RESPONSIVE DESIGN: Fluid typography & layout for mobile/tablet/desktop
  * - Optimized rendering (debounced, surgical updates for countdown)
  * - Safari/iOS scroll fix with proper touch handling
+ * - FIX: Auto-refresh matrix after batch sync (v2.6.1)
  * 
  * Styled to match Mushroom/button-card aesthetics.
  * Auto-discovers all Aroma-Link devices - no configuration needed!
@@ -699,9 +700,15 @@ class AromaLinkScheduleCard extends HTMLElement {
       // Clear staged changes
       staged.clear();
       
+      this._showStatus(`✓ Saved! Refreshing schedule...`, false, sensor.deviceName);
+      console.log(`[AromaLink] Batch save complete, refreshing matrix...`);
+      
+      // Pull fresh schedule data from API to update the matrix display
+      await this._pullSchedule(sensor);
+      
       this._isSaving = false;
       this._showStatus(`✓ Saved ${totalDays} day(s) to Aroma-Link`, false, sensor.deviceName);
-      console.log(`[AromaLink] Batch save complete`);
+      console.log(`[AromaLink] Matrix refreshed`);
       
     } catch (error) {
       console.error('Error pushing changes:', error);
