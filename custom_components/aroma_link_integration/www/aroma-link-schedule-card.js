@@ -1042,112 +1042,133 @@ class AromaLinkScheduleCard extends HTMLElement {
             <details class="calibration-panel" data-device="${sensor.deviceName}" ${panelOpen ? 'open' : ''}>
               <summary>Calibration & Tracking</summary>
               <div class="calibration-content">
-                <div class="calibration-row">
-                  <span class="stat-label">Runtime</span>
-                  <span class="stat-value">${formattedRuntime}</span>
-                </div>
-                <div class="calibration-row">
-                  <span class="stat-label">Cycles</span>
-                  <span class="stat-value">${completedCycles}</span>
-                </div>
-                <div class="calibration-row">
-                  <span class="stat-label">Tracking</span>
-                  <span class="stat-value ${trackingActive ? 'active' : 'inactive'}">${trackingActive ? 'Active' : 'Inactive'}</span>
+                
+                <!-- SECTION: Current Status -->
+                <div class="cal-section">
+                  <div class="cal-section-title">📊 Current Status</div>
+                  <div class="cal-section-grid">
+                    <div class="stat-item">
+                      <span class="stat-label">Runtime</span>
+                      <span class="stat-value">${formattedRuntime}</span>
+                    </div>
+                    <div class="stat-item">
+                      <span class="stat-label">Cycles</span>
+                      <span class="stat-value">${completedCycles}</span>
+                    </div>
+                    <div class="stat-item">
+                      <span class="stat-label">Tracking</span>
+                      <span class="stat-value ${trackingActive ? 'active' : 'inactive'}">${trackingActive ? 'Active' : 'Inactive'}</span>
+                    </div>
+                  </div>
                 </div>
 
-                <div class="calibration-row">
-                  <label>Bottle Capacity</label>
-                  <div class="input-group">
-                    <input type="number" class="oil-input" data-oil="bottleCapacity" data-device="${sensor.deviceName}" 
-                           value="${bottleCapacity}" min="10" max="1000" step="5">
-                    <span>ml</span>
-                  </div>
-                </div>
-                <div class="calibration-row">
-                  <label>Fill Volume</label>
-                  <div class="input-group">
-                    <input type="number" class="oil-input" data-oil="fillVolume" data-device="${sensor.deviceName}" 
-                           value="${fillVolume}" min="0" max="1000" step="1">
-                    <span>ml</span>
-                  </div>
-                </div>
-                <div class="calibration-row">
-                  <label>Fill Date</label>
-                  <div class="input-group">
-                    <input type="date" class="oil-input date" data-oil="fillDate" data-device="${sensor.deviceName}" 
-                           value="${fillDate}">
-                  </div>
-                </div>
-                <div class="calibration-row">
-                  <label>Measured Remaining</label>
-                  <div class="input-group">
-                    <input type="number" class="oil-input" data-oil="measuredRemaining" data-device="${sensor.deviceName}" 
-                           value="${measuredRemaining}" min="0" max="1000" step="1" ${measuredDisabled ? 'disabled' : ''}>
-                    <span>ml</span>
-                  </div>
-                </div>
-                
-                <div class="calibration-actions">
-                  <button class="oil-btn fill-btn" data-action="oil-toggle" data-device="${sensor.deviceName}">
-                    ${toggleLabel}
-                  </button>
-                  <button class="oil-btn calibrate-btn ${canFinalize ? '' : 'disabled'}" data-action="oil-finalize" data-device="${sensor.deviceName}">
-                    Finalize Calibration
-                  </button>
-                </div>
-
-                <div class="calibration-actions secondary">
-                  <button class="oil-btn small-btn" data-action="oil-refill" data-device="${sensor.deviceName}">
-                    Refill (Keep Calibration)
-                  </button>
-                </div>
-                
-                <div class="manual-override">
-                  <div class="manual-title">Manual Override</div>
-                  <div class="calibration-row">
-                    <label>Start Volume</label>
-                    <div class="input-group">
-                      <input type="number" class="oil-input" data-oil="manualStart" data-device="${sensor.deviceName}" 
-                             value="${manualStart}" min="0" max="1000" step="1">
-                      <span>ml</span>
+                <!-- SECTION: Bottle Settings -->
+                <div class="cal-section">
+                  <div class="cal-section-title">🍶 Bottle Settings</div>
+                  <div class="cal-section-fields">
+                    <div class="calibration-row">
+                      <label>Capacity</label>
+                      <div class="input-group">
+                        <input type="number" class="oil-input" data-oil="bottleCapacity" data-device="${sensor.deviceName}" 
+                               value="${bottleCapacity}" min="10" max="1000" step="5">
+                        <span>ml</span>
+                      </div>
                     </div>
-                  </div>
-                  <div class="calibration-row">
-                    <label>End Volume</label>
-                    <div class="input-group">
-                      <input type="number" class="oil-input" data-oil="manualEnd" data-device="${sensor.deviceName}" 
-                             value="${manualEnd}" min="0" max="1000" step="1">
-                      <span>ml</span>
+                    <div class="calibration-row">
+                      <label>Fill Volume</label>
+                      <div class="input-group">
+                        <input type="number" class="oil-input" data-oil="fillVolume" data-device="${sensor.deviceName}" 
+                               value="${fillVolume}" min="0" max="1000" step="1">
+                        <span>ml</span>
+                      </div>
                     </div>
-                  </div>
-                  <div class="calibration-row">
-                    <label>Total Runtime</label>
-                    <div class="input-group">
-                      <input type="number" class="oil-input" data-oil="manualRuntime" data-device="${sensor.deviceName}" 
-                             value="${manualRuntime}" min="0" max="10000" step="0.1">
-                      <span>hr</span>
-                    </div>
-                  </div>
-                  <div class="calibration-row">
-                    <label>Consumption Rate</label>
-                    <div class="input-group">
-                      <input type="number" class="oil-input" data-oil="manualRate" data-device="${sensor.deviceName}" 
-                             value="${manualRate}" min="0" max="1000" step="0.01">
-                      <span>ml/hr</span>
+                    <div class="calibration-row">
+                      <label>Fill Date</label>
+                      <div class="input-group">
+                        <input type="date" class="oil-input date" data-oil="fillDate" data-device="${sensor.deviceName}" 
+                               value="${fillDate}">
+                      </div>
                     </div>
                   </div>
                   <div class="calibration-actions secondary">
-                    <button class="oil-btn small-btn ${canManualApply ? '' : 'disabled'}" data-action="oil-manual-apply" data-device="${sensor.deviceName}">
-                      Apply Manual Override
+                    <button class="oil-btn small-btn" data-action="oil-refill" data-device="${sensor.deviceName}">
+                      🔄 Refill (Keep Calibration)
                     </button>
                   </div>
                 </div>
 
-                ${calibrationState === 'Ready to Finalize' && !canFinalize ? `
-                  <div class="calibration-warning">
-                    Measure remaining oil and ensure at least 10% of fill volume has been consumed.
+                <!-- SECTION: Calibration -->
+                <div class="cal-section">
+                  <div class="cal-section-title">📏 Calibration</div>
+                  <div class="cal-section-fields">
+                    <div class="calibration-row">
+                      <label>Measured Remaining</label>
+                      <div class="input-group">
+                        <input type="number" class="oil-input" data-oil="measuredRemaining" data-device="${sensor.deviceName}" 
+                               value="${measuredRemaining}" min="0" max="1000" step="1" ${measuredDisabled ? 'disabled' : ''}>
+                        <span>ml</span>
+                      </div>
+                    </div>
                   </div>
-                ` : ''}
+                  <div class="calibration-actions">
+                    <button class="oil-btn fill-btn" data-action="oil-toggle" data-device="${sensor.deviceName}">
+                      ${toggleLabel}
+                    </button>
+                    <button class="oil-btn calibrate-btn ${canFinalize ? '' : 'disabled'}" data-action="oil-finalize" data-device="${sensor.deviceName}">
+                      Finalize
+                    </button>
+                  </div>
+                  ${calibrationState === 'Ready to Finalize' && !canFinalize ? `
+                    <div class="calibration-warning">
+                      ⚠️ Measure remaining oil. At least 10% must be consumed.
+                    </div>
+                  ` : ''}
+                </div>
+
+                <!-- SECTION: Manual Override -->
+                <div class="cal-section manual-override">
+                  <div class="cal-section-title">✏️ Manual Override</div>
+                  <div class="cal-section-fields">
+                    <div class="calibration-row">
+                      <label>Start Vol</label>
+                      <div class="input-group">
+                        <input type="number" class="oil-input" data-oil="manualStart" data-device="${sensor.deviceName}" 
+                               value="${manualStart}" min="0" max="1000" step="1">
+                        <span>ml</span>
+                      </div>
+                    </div>
+                    <div class="calibration-row">
+                      <label>End Vol</label>
+                      <div class="input-group">
+                        <input type="number" class="oil-input" data-oil="manualEnd" data-device="${sensor.deviceName}" 
+                               value="${manualEnd}" min="0" max="1000" step="1">
+                        <span>ml</span>
+                      </div>
+                    </div>
+                    <div class="calibration-row">
+                      <label>Runtime</label>
+                      <div class="input-group">
+                        <input type="number" class="oil-input" data-oil="manualRuntime" data-device="${sensor.deviceName}" 
+                               value="${manualRuntime}" min="0" max="10000" step="0.1">
+                        <span>hr</span>
+                      </div>
+                    </div>
+                    <div class="calibration-row">
+                      <label>Rate</label>
+                      <div class="input-group">
+                        <input type="number" class="oil-input" data-oil="manualRate" data-device="${sensor.deviceName}" 
+                               value="${manualRate}" min="0" max="1000" step="0.01">
+                        <span>ml/hr</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="calibration-actions secondary">
+                    <button class="oil-btn small-btn ${canManualApply ? '' : 'disabled'}" data-action="oil-manual-apply" data-device="${sensor.deviceName}">
+                      Apply Override
+                    </button>
+                  </div>
+                </div>
+
               </div>
             </details>
           </div>
@@ -1382,6 +1403,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                   : 'Click cells to select, click P1-P5 for rows, click day headers for columns'}
               </div>
               
+              <!-- Row 1: Settings -->
               <div class="editor-row-inline">
                 <label class="toggle-label">
                   <input type="checkbox" data-field="enabled" data-device="${sensor.deviceName}" ${editorValues.enabled ? 'checked' : ''}>
@@ -1398,28 +1420,26 @@ class AromaLinkScheduleCard extends HTMLElement {
                   <label>Work <input type="number" class="num-input" data-field="editorWorkSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999"><span class="unit">s</span></label>
                   <label>Pause <input type="number" class="num-input" data-field="editorPauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999"><span class="unit">s</span></label>
                 </div>
-                
-                <div class="inline-actions">
-                  <button class="clear-btn ${selectionCount === 0 ? 'disabled' : ''}" 
-                          data-action="clear-schedule" data-device="${sensor.deviceName}">
-                    Clear Selected
-                  </button>
-                  <button class="stage-btn ${selectionCount === 0 ? 'disabled' : ''}" 
-                          data-action="stage" data-device="${sensor.deviceName}">
-                    Stage Edits
-                  </button>
-                  <button class="push-btn ${!hasStagedChanges || this._isSaving ? 'disabled' : ''}" 
-                          data-action="push" data-device="${sensor.deviceName}">
-                    ${this._isSaving ? 'Saving...' : 'Save & Sync to Aroma-Link'}
-                  </button>
-                </div>
-                
-                <label class="level-label">Level</label>
-                <select class="level-select" data-field="level" data-device="${sensor.deviceName}">
-                  <option value="A" ${editorValues.level === 'A' ? 'selected' : ''}>A</option>
-                  <option value="B" ${editorValues.level === 'B' ? 'selected' : ''}>B</option>
-                  <option value="C" ${editorValues.level === 'C' ? 'selected' : ''}>C</option>
-                </select>
+              </div>
+              
+              <!-- Row 2: Actions -->
+              <div class="editor-actions-row">
+                <button class="clear-btn ${selectionCount === 0 ? 'disabled' : ''}" 
+                        data-action="clear-schedule" data-device="${sensor.deviceName}">Clear</button>
+                <button class="stage-btn ${selectionCount === 0 ? 'disabled' : ''}" 
+                        data-action="stage" data-device="${sensor.deviceName}">Stage</button>
+                <span class="level-group">
+                  <label class="level-label">Level</label>
+                  <select class="level-select" data-field="level" data-device="${sensor.deviceName}">
+                    <option value="A" ${editorValues.level === 'A' ? 'selected' : ''}>A</option>
+                    <option value="B" ${editorValues.level === 'B' ? 'selected' : ''}>B</option>
+                    <option value="C" ${editorValues.level === 'C' ? 'selected' : ''}>C</option>
+                  </select>
+                </span>
+                <button class="push-btn ${!hasStagedChanges || this._isSaving ? 'disabled' : ''}" 
+                        data-action="push" data-device="${sensor.deviceName}">
+                  ${this._isSaving ? 'Saving...' : 'Sync'}
+                </button>
               </div>
             </div>
               `;
@@ -1523,46 +1543,66 @@ class AromaLinkScheduleCard extends HTMLElement {
       });
     });
 
-    // Cell clicks
+    // Cell clicks - Safari-compatible event handling
     this.shadowRoot.querySelectorAll('[data-action="toggle-cell"]').forEach(cell => {
-      cell.addEventListener('click', () => {
+      cell.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         if (this._isSaving) return;
         const day = parseInt(cell.dataset.day);
         const program = parseInt(cell.dataset.program);
         const deviceName = cell.dataset.device;
         const sensor = sensors.find(s => s.deviceName === deviceName);
         if (sensor) this._toggleCell(deviceName, day, program, sensor);
-      });
+        return false;
+      }, { passive: false, capture: true });
     });
 
     // Row/column selection
     this.shadowRoot.querySelectorAll('[data-action="select-row"]').forEach(row => {
-      row.addEventListener('click', () => {
+      row.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         if (this._isSaving) return;
         this._selectProgramRow(row.dataset.device, parseInt(row.dataset.program));
-      });
+        return false;
+      }, { passive: false, capture: true });
     });
 
     this.shadowRoot.querySelectorAll('[data-action="select-day"]').forEach(header => {
-      header.addEventListener('click', () => {
+      header.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         if (this._isSaving) return;
         this._selectDayColumn(header.dataset.device, parseInt(header.dataset.day));
-      });
+        return false;
+      }, { passive: false, capture: true });
     });
 
-    // Select all / clear
+    // Select all / clear - Safari-compatible
     this.shadowRoot.querySelectorAll('[data-action="select-all"]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         if (this._isSaving) return;
         this._selectAll(btn.dataset.device);
-      });
+        return false;
+      }, { passive: false });
     });
 
     this.shadowRoot.querySelectorAll('[data-action="clear-selection"]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         if (this._isSaving) return;
         this._clearSelection(btn.dataset.device);
-      });
+        return false;
+      }, { passive: false });
     });
 
     // Pull
@@ -2250,6 +2290,17 @@ class AromaLinkScheduleCard extends HTMLElement {
       .grid-cell.day-header {
         cursor: pointer;
         user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+      }
+      
+      /* Prevent Safari scroll jump on click */
+      .schedule-cell,
+      .grid-cell.program-label,
+      .grid-cell.day-header,
+      .chip-btn {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
       }
       
       .grid-cell.program-label:hover,
@@ -2492,23 +2543,19 @@ class AromaLinkScheduleCard extends HTMLElement {
         margin-left: 4px;
       }
       
-      /* INLINE ACTIONS - Stack on mobile */
-      .inline-actions {
+      /* EDITOR ACTIONS ROW */
+      .editor-actions-row {
         display: flex;
         align-items: center;
-        gap: clamp(4px, 1vw, 6px);
+        gap: clamp(6px, 1.5vw, 10px);
         flex-wrap: wrap;
-        width: 100%;
       }
       
-      @container (max-width: 400px) {
-        .inline-actions {
-          flex-direction: column;
-          align-items: stretch;
-        }
-        .inline-actions .push-btn {
-          margin-left: 0;
-        }
+      .level-group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: auto;
       }
       
       .stage-btn, .clear-btn, .push-btn {
@@ -2802,9 +2849,45 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .calibration-content {
         padding: clamp(10px, 2.5vw, 14px);
+        display: flex;
+        flex-direction: column;
+        gap: clamp(12px, 3vw, 16px);
+      }
+      
+      /* Calibration Sections */
+      .cal-section {
+        background: var(--card-background-color, white);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.08));
+        border-radius: 8px;
+        padding: clamp(8px, 2vw, 12px);
+      }
+      
+      .cal-section-title {
+        font-size: var(--font-sm);
+        font-weight: 600;
+        color: var(--primary-text-color);
+        margin-bottom: clamp(6px, 1.5vw, 10px);
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.06));
+      }
+      
+      .cal-section-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(clamp(140px, 35vw, 180px), 1fr));
-        gap: clamp(8px, 2vw, 10px) clamp(10px, 2.5vw, 16px);
+        grid-template-columns: repeat(3, 1fr);
+        gap: clamp(6px, 1.5vw, 10px);
+      }
+      
+      .stat-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      
+      .cal-section-fields {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(clamp(120px, 30vw, 150px), 1fr));
+        gap: clamp(6px, 1.5vw, 10px);
       }
       
       .calibration-row {
@@ -2916,18 +2999,9 @@ class AromaLinkScheduleCard extends HTMLElement {
         grid-column: 1 / -1;
       }
 
-      .manual-override {
-        margin-top: 12px;
-        padding-top: 10px;
-        border-top: 1px dashed rgba(0,0,0,0.15);
-        grid-column: 1 / -1;
-      }
-
-      .manual-title {
-        font-size: 0.75em;
-        font-weight: 600;
-        color: var(--primary-text-color, #444);
-        margin-bottom: 6px;
+      .cal-section.manual-override {
+        background: rgba(0,0,0,0.02);
+        border-style: dashed;
       }
     `;
   }
