@@ -1032,7 +1032,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <div class="calibration-row">
                       <label>Capacity</label>
                       <div class="input-group">
-                        <input type="number" class="oil-input" data-oil="bottleCapacity" data-device="${sensor.deviceName}" 
+                        <input type="number" class="oil-input" id="oil-bottleCapacity-${sensor.deviceName}" data-oil="bottleCapacity" data-device="${sensor.deviceName}" 
                                value="${bottleCapacity}" min="10" max="1000" step="5">
                         <span>ml</span>
                       </div>
@@ -1040,7 +1040,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <div class="calibration-row">
                       <label>Fill Volume</label>
                       <div class="input-group">
-                        <input type="number" class="oil-input" data-oil="fillVolume" data-device="${sensor.deviceName}" 
+                        <input type="number" class="oil-input" id="oil-fillVolume-${sensor.deviceName}" data-oil="fillVolume" data-device="${sensor.deviceName}" 
                                value="${fillVolume}" min="0" max="1000" step="1">
                         <span>ml</span>
                       </div>
@@ -1048,7 +1048,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <div class="calibration-row">
                       <label>Fill Date</label>
                       <div class="input-group">
-                        <input type="date" class="oil-input date" data-oil="fillDate" data-device="${sensor.deviceName}" 
+                        <input type="date" class="oil-input date" id="oil-fillDate-${sensor.deviceName}" data-oil="fillDate" data-device="${sensor.deviceName}" 
                                value="${fillDate}">
                       </div>
                     </div>
@@ -1067,7 +1067,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <div class="calibration-row">
                       <label>Measured Remaining</label>
                       <div class="input-group">
-                        <input type="number" class="oil-input" data-oil="measuredRemaining" data-device="${sensor.deviceName}" 
+                        <input type="number" class="oil-input" id="oil-measuredRemaining-${sensor.deviceName}" data-oil="measuredRemaining" data-device="${sensor.deviceName}" 
                                value="${measuredRemaining}" min="0" max="1000" step="1" ${measuredDisabled ? 'disabled' : ''}>
                         <span>ml</span>
                       </div>
@@ -1095,7 +1095,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <div class="calibration-row">
                       <label>Start Vol</label>
                       <div class="input-group">
-                        <input type="number" class="oil-input" data-oil="manualStart" data-device="${sensor.deviceName}" 
+                        <input type="number" class="oil-input" id="oil-manualStart-${sensor.deviceName}" data-oil="manualStart" data-device="${sensor.deviceName}" 
                                value="${manualStart}" min="0" max="1000" step="1">
                         <span>ml</span>
                       </div>
@@ -1103,7 +1103,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <div class="calibration-row">
                       <label>End Vol</label>
                       <div class="input-group">
-                        <input type="number" class="oil-input" data-oil="manualEnd" data-device="${sensor.deviceName}" 
+                        <input type="number" class="oil-input" id="oil-manualEnd-${sensor.deviceName}" data-oil="manualEnd" data-device="${sensor.deviceName}" 
                                value="${manualEnd}" min="0" max="1000" step="1">
                         <span>ml</span>
                       </div>
@@ -1111,7 +1111,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <div class="calibration-row">
                       <label>Runtime</label>
                       <div class="input-group">
-                        <input type="number" class="oil-input" data-oil="manualRuntime" data-device="${sensor.deviceName}" 
+                        <input type="number" class="oil-input" id="oil-manualRuntime-${sensor.deviceName}" data-oil="manualRuntime" data-device="${sensor.deviceName}" 
                                value="${manualRuntime}" min="0" max="10000" step="0.1">
                         <span>hr</span>
                       </div>
@@ -1119,7 +1119,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <div class="calibration-row">
                       <label>Rate</label>
                       <div class="input-group">
-                        <input type="number" class="oil-input" data-oil="manualRate" data-device="${sensor.deviceName}" 
+                        <input type="number" class="oil-input" id="oil-manualRate-${sensor.deviceName}" data-oil="manualRate" data-device="${sensor.deviceName}" 
                                value="${manualRate}" min="0" max="1000" step="0.01">
                         <span>ml/hr</span>
                       </div>
@@ -1259,8 +1259,8 @@ class AromaLinkScheduleCard extends HTMLElement {
             </div>
             
             <div class="control-group settings">
-              <label>Work <input type="number" class="compact-input" data-field="workSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999"><span class="unit">s</span></label>
-              <label>Pause <input type="number" class="compact-input" data-field="pauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999"><span class="unit">s</span></label>
+              <label>Work <input type="number" class="compact-input" id="workSec-${sensor.deviceName}" data-field="workSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999"><span class="unit">s</span></label>
+              <label>Pause <input type="number" class="compact-input" id="pauseSec-${sensor.deviceName}" data-field="pauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999"><span class="unit">s</span></label>
             </div>
             
             <div class="control-group run-options">
@@ -1274,7 +1274,7 @@ class AromaLinkScheduleCard extends HTMLElement {
                 ` : `
                   <div class="run-buttons">
                     <button class="run-btn timed" data-action="run-timed" data-device="${sensor.deviceName}">Start</button>
-                    <input type="number" class="hours-input" data-field="timedHours" data-device="${sensor.deviceName}" value="${timedHours}" min="0.5" max="24" step="0.5" title="Hours">
+                    <input type="number" class="hours-input" id="timedHours-${sensor.deviceName}" data-field="timedHours" data-device="${sensor.deviceName}" value="${timedHours}" min="0.5" max="24" step="0.5" title="Hours">
                     <span class="hours-label">hr</span>
                   </div>
                 `}
@@ -1288,7 +1288,7 @@ class AromaLinkScheduleCard extends HTMLElement {
               <span class="section-title">Weekly Schedule</span>
               ${otherSensors.length > 0 ? `
                 <div class="copy-dropdown">
-                  <select class="copy-select" data-device="${sensor.deviceName}">
+                  <select class="copy-select" id="copyFrom-${sensor.deviceName}" data-device="${sensor.deviceName}">
                     <option value="">Copy from...</option>
                     ${otherSensors.map(s => `<option value="${s.deviceName}">${s.deviceName.replace(/_/g, ' ')}</option>`).join('')}
                   </select>
@@ -1388,19 +1388,19 @@ class AromaLinkScheduleCard extends HTMLElement {
               <!-- Row 1: Settings -->
               <div class="editor-row-inline">
                 <label class="toggle-label">
-                  <input type="checkbox" data-field="enabled" data-device="${sensor.deviceName}" ${editorValues.enabled ? 'checked' : ''}>
+                  <input type="checkbox" id="enabled-${sensor.deviceName}" data-field="enabled" data-device="${sensor.deviceName}" ${editorValues.enabled ? 'checked' : ''}>
                   <span>Enabled</span>
                 </label>
                 
                 <div class="time-inputs ${timeDisabledClass}">
-                  <input type="time" class="time-input" data-field="startTime" data-device="${sensor.deviceName}" value="${editorValues.startTime}" ${timeDisabled}>
+                  <input type="time" class="time-input" id="startTime-${sensor.deviceName}" data-field="startTime" data-device="${sensor.deviceName}" value="${editorValues.startTime}" ${timeDisabled}>
                   <span>-</span>
-                  <input type="time" class="time-input" data-field="endTime" data-device="${sensor.deviceName}" value="${editorValues.endTime}" ${timeDisabled}>
+                  <input type="time" class="time-input" id="endTime-${sensor.deviceName}" data-field="endTime" data-device="${sensor.deviceName}" value="${editorValues.endTime}" ${timeDisabled}>
                 </div>
                 
                 <div class="num-inputs">
-                  <label>Work <input type="number" class="num-input" data-field="editorWorkSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999"><span class="unit">s</span></label>
-                  <label>Pause <input type="number" class="num-input" data-field="editorPauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999"><span class="unit">s</span></label>
+                  <label>Work <input type="number" class="num-input" id="editorWorkSec-${sensor.deviceName}" data-field="editorWorkSec" data-device="${sensor.deviceName}" value="${editorValues.workSec}" min="1" max="999"><span class="unit">s</span></label>
+                  <label>Pause <input type="number" class="num-input" id="editorPauseSec-${sensor.deviceName}" data-field="editorPauseSec" data-device="${sensor.deviceName}" value="${editorValues.pauseSec}" min="1" max="9999"><span class="unit">s</span></label>
                 </div>
               </div>
               
@@ -1408,7 +1408,7 @@ class AromaLinkScheduleCard extends HTMLElement {
               <div class="editor-actions-row">
                 <span class="level-group">
                   <label class="level-label">Level</label>
-                  <select class="level-select" data-field="level" data-device="${sensor.deviceName}">
+                  <select class="level-select" id="level-${sensor.deviceName}" data-field="level" data-device="${sensor.deviceName}">
                     <option value="A" ${editorValues.level === 'A' ? 'selected' : ''}>A</option>
                     <option value="B" ${editorValues.level === 'B' ? 'selected' : ''}>B</option>
                     <option value="C" ${editorValues.level === 'C' ? 'selected' : ''}>C</option>
