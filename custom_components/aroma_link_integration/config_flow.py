@@ -127,67 +127,6 @@ class AromaLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get the options flow for this handler."""
         return AromaLinkOptionsFlowHandler(config_entry)
 
-
-class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle Aroma-Link options."""
-
-    def __init__(self, config_entry):
-        """Initialize options flow."""
-        self._config_entry = config_entry
-
-    async def async_step_init(self, user_input=None):
-        """Manage the options."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
-        options = self._config_entry.options
-        
-        # Handle migration from old minutes-based config
-        current_poll = options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_SECONDS)
-        # If value is very small (1-30), it's likely old minutes format - convert
-        if current_poll <= 30:
-            current_poll = current_poll * 60
-        
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_POLL_INTERVAL,
-                        default=current_poll,
-                        description={"suggested_value": current_poll},
-                    ): vol.All(
-                        vol.Coerce(int), 
-                        vol.Range(min=MIN_POLL_INTERVAL_SECONDS, max=MAX_POLL_INTERVAL_SECONDS)
-                    ),
-                    vol.Optional(
-                        CONF_VERIFY_SSL,
-                        default=options.get(
-                            CONF_VERIFY_SSL,
-                            self._config_entry.data.get(CONF_VERIFY_SSL, False),
-                        ),
-                    ): bool,
-                    vol.Optional(
-                        CONF_ALLOW_SSL_FALLBACK,
-                        default=options.get(
-                            CONF_ALLOW_SSL_FALLBACK,
-                            self._config_entry.data.get(
-                                CONF_ALLOW_SSL_FALLBACK, DEFAULT_ALLOW_SSL_FALLBACK
-                            ),
-                        ),
-                    ): bool,
-                    vol.Optional(
-                        CONF_DEBUG_LOGGING,
-                        default=options.get(CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING),
-                    ): bool,
-                }
-            ),
-            description_placeholders={
-                "min_poll": str(MIN_POLL_INTERVAL_SECONDS),
-                "max_poll": str(MAX_POLL_INTERVAL_SECONDS),
-            },
-        )
-        
     async def _authenticate(self, username, password, verify_ssl=True):
         """Authenticate with Aroma-Link API and retrieve device list.
         
@@ -372,3 +311,64 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
             _LOGGER.error(f"Error fetching device list: {e}", exc_info=True)
             
         return devices
+
+
+class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle Aroma-Link options."""
+
+    def __init__(self, config_entry):
+        """Initialize options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = self._config_entry.options
+        
+        # Handle migration from old minutes-based config
+        current_poll = options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL_SECONDS)
+        # If value is very small (1-30), it's likely old minutes format - convert
+        if current_poll <= 30:
+            current_poll = current_poll * 60
+        
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        CONF_POLL_INTERVAL,
+                        default=current_poll,
+                        description={"suggested_value": current_poll},
+                    ): vol.All(
+                        vol.Coerce(int), 
+                        vol.Range(min=MIN_POLL_INTERVAL_SECONDS, max=MAX_POLL_INTERVAL_SECONDS)
+                    ),
+                    vol.Optional(
+                        CONF_VERIFY_SSL,
+                        default=options.get(
+                            CONF_VERIFY_SSL,
+                            self._config_entry.data.get(CONF_VERIFY_SSL, False),
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ALLOW_SSL_FALLBACK,
+                        default=options.get(
+                            CONF_ALLOW_SSL_FALLBACK,
+                            self._config_entry.data.get(
+                                CONF_ALLOW_SSL_FALLBACK, DEFAULT_ALLOW_SSL_FALLBACK
+                            ),
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_DEBUG_LOGGING,
+                        default=options.get(CONF_DEBUG_LOGGING, DEFAULT_DEBUG_LOGGING),
+                    ): bool,
+                }
+            ),
+            description_placeholders={
+                "min_poll": str(MIN_POLL_INTERVAL_SECONDS),
+                "max_poll": str(MAX_POLL_INTERVAL_SECONDS),
+            },
+        )
