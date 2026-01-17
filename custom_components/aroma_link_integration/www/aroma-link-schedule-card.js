@@ -1,5 +1,5 @@
 /**
- * Aroma-Link Schedule Card v2.4.0
+ * Aroma-Link Schedule Card v2.5.0
  * 
  * A complete dashboard card for Aroma-Link diffusers including:
  * - Compact manual controls (Power, Fan, Work/Pause, Run options in one row)
@@ -8,6 +8,7 @@
  * - Copy schedule from another diffuser
  * - SERVER-SIDE timed run (survives browser close!)
  * - OIL LEVEL TRACKING with bottle visualization and calibration
+ * - RESPONSIVE DESIGN: Fluid typography & layout for mobile/tablet/desktop
  * 
  * Styled to match Mushroom/button-card aesthetics.
  * Auto-discovers all Aroma-Link devices - no configuration needed!
@@ -1257,17 +1258,14 @@ class AromaLinkScheduleCard extends HTMLElement {
             </div>
             
             <div class="control-group run-options">
-              ${timerState ? `
-                <div class="run-panel">
-                  <div class="run-header">Apply Settings and</div>
+              <div class="run-panel">
+                <div class="run-header">Apply Settings</div>
+                ${timerState ? `
                   <div class="run-buttons">
                     <span class="countdown">⏱️ ${this._formatCountdown(timerState.remainingSeconds)}</span>
                     <button class="cancel-btn" data-action="cancel-timer" data-device="${sensor.deviceName}">Cancel</button>
                   </div>
-                </div>
-              ` : `
-                <div class="run-panel">
-                  <div class="run-header">Apply Settings and</div>
+                ` : `
                   <div class="run-buttons">
                     <button class="run-btn continuous" data-action="run-continuous" data-device="${sensor.deviceName}">Run Continuously</button>
                     <div class="timed-box">
@@ -1276,8 +1274,8 @@ class AromaLinkScheduleCard extends HTMLElement {
                       <span class="hours-label">hr</span>
                     </div>
                   </div>
-                </div>
-              `}
+                `}
+              </div>
             </div>
           </div>
           
@@ -1304,7 +1302,8 @@ class AromaLinkScheduleCard extends HTMLElement {
               <span class="legend-item"><span class="legend-dot selected"></span>Selected</span>
             </div>
 
-            <!-- Grid -->
+            <!-- Grid with horizontal scroll wrapper -->
+            <div class="schedule-grid-wrapper">
             <div class="schedule-grid" data-device="${sensor.deviceName}">
               <div class="grid-cell header corner"></div>
               ${dayLabels.map((d, idx) => {
@@ -1339,14 +1338,17 @@ class AromaLinkScheduleCard extends HTMLElement {
                       <div class="grid-cell schedule-cell ${cellClass} ${isSelected ? 'selected' : ''} ${isToday ? 'today-col' : ''}" 
                            data-action="toggle-cell" data-day="${dayIdx}" data-program="${prog}" data-device="${sensor.deviceName}">
                         ${isEnabled || hasSettings ? `
-                          <span class="cell-time">${cellData.startTime}-${cellData.endTime}</span>
-                          <span class="cell-meta">${cellData.workSec}s / ${cellData.pauseSec}s [L${cellData.level}]</span>
+                          <span class="cell-start">${cellData.startTime}</span>
+                          <span class="cell-end">${cellData.endTime}</span>
+                          <span class="cell-work">${cellData.workSec}/${cellData.pauseSec}</span>
+                          <span class="cell-level">[${cellData.level}]</span>
                         ` : '<span class="off-label">OFF</span>'}
                       </div>
                     `;
                   }).join('')}
                 `;
               }).join('')}
+            </div>
             </div>
             
             <!-- Selection actions -->
@@ -1794,7 +1796,17 @@ class AromaLinkScheduleCard extends HTMLElement {
         --color-error: #f44336;
         --radius: 12px;
         --radius-sm: 8px;
-        --spacing: 12px;
+        --spacing: clamp(8px, 2vw, 12px);
+        
+        /* Fluid typography */
+        --font-xs: clamp(0.6rem, 1.5vw, 0.7rem);
+        --font-sm: clamp(0.7rem, 2vw, 0.8rem);
+        --font-md: clamp(0.8rem, 2.5vw, 0.95rem);
+        --font-lg: clamp(0.9rem, 3vw, 1.1rem);
+        
+        /* Grid cell sizing */
+        --cell-min-width: clamp(58px, 11vw, 90px);
+        --cell-height: clamp(54px, 12vw, 68px);
       }
       
       ha-card {
@@ -1806,6 +1818,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       .diffuser-card {
         padding: var(--spacing);
         border-bottom: 1px solid var(--color-surface);
+        container-type: inline-size;
       }
       
       .diffuser-card:last-child {
@@ -1817,45 +1830,55 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .title {
-        font-size: 1.1em;
+        font-size: var(--font-lg);
         font-weight: 600;
         color: var(--color-text);
       }
       
-      /* COMPACT CONTROLS */
+      /* COMPACT CONTROLS - Responsive */
       .compact-controls {
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
         align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 12px 14px;
+        gap: clamp(8px, 2vw, 12px);
+        padding: clamp(8px, 2vw, 14px);
         background: var(--color-surface);
         border-radius: var(--radius-sm);
         margin-bottom: var(--spacing);
       }
       
+      /* Stack on narrow screens */
+      @container (max-width: 500px) {
+        .compact-controls {
+          grid-template-columns: 1fr 1fr;
+          grid-template-rows: auto auto;
+        }
+        .control-group.run-options {
+          grid-column: 1 / -1;
+        }
+      }
+      
       .control-group {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: clamp(4px, 1vw, 8px);
       }
 
       .control-group.power-group {
-        gap: 10px;
+        gap: clamp(6px, 1.5vw, 10px);
       }
       
       .icon-btn {
         display: flex;
         flex-direction: column;
         align-items: center;
-        padding: 10px 14px;
+        padding: clamp(6px, 1.5vw, 10px) clamp(8px, 2vw, 14px);
         border: none;
         border-radius: 8px;
         background: rgba(0,0,0,0.05);
         cursor: pointer;
         transition: all 150ms;
-        min-width: 76px;
+        min-width: clamp(56px, 12vw, 76px);
       }
       
       .icon-btn:hover {
@@ -1868,21 +1891,21 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .icon-btn .icon {
-        font-size: 1.4em;
+        font-size: clamp(1.1em, 3vw, 1.4em);
       }
 
       .icon-btn ha-icon.icon {
-        --mdc-icon-size: 22px;
+        --mdc-icon-size: clamp(18px, 4vw, 22px);
       }
       
       .icon-btn .label {
-        font-size: 0.7em;
+        font-size: var(--font-xs);
         font-weight: 600;
         margin-top: 2px;
       }
 
       .icon-btn .state {
-        font-size: 0.7em;
+        font-size: var(--font-xs);
         font-weight: 700;
         margin-top: 2px;
         letter-spacing: 0.3px;
@@ -1890,74 +1913,76 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .control-group.settings {
         display: flex;
-        gap: 10px;
+        gap: clamp(6px, 1.5vw, 10px);
+        flex-wrap: wrap;
       }
       
       .control-group.settings label {
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         font-weight: 500;
         color: var(--color-text-secondary);
       }
       
       .compact-input {
-        width: 64px;
-        padding: 6px 8px;
+        width: clamp(48px, 10vw, 64px);
+        padding: clamp(4px, 1vw, 6px) clamp(4px, 1vw, 8px);
         border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
-        font-size: 0.95em;
+        font-size: var(--font-sm);
         text-align: center;
         background: var(--card-background-color, white);
         color: var(--primary-text-color);
       }
 
       .unit {
-        font-size: 0.75em;
+        font-size: var(--font-xs);
         color: var(--color-text-secondary);
       }
       
       .control-group.run-options {
         display: flex;
         flex-direction: column;
-        align-items: flex-end;
+        align-items: stretch;
         gap: 6px;
-        margin-left: auto;
         flex: 1;
+        min-width: 0;
       }
 
       .run-panel {
         display: flex;
         flex-direction: column;
-        align-items: center;
-        gap: 6px;
-        width: 100%;
+        align-items: stretch;
+        gap: clamp(8px, 2vw, 12px);
+        padding: clamp(10px, 2.5vw, 14px);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
+        border-radius: var(--radius-sm);
+        background: rgba(0,0,0,0.02);
       }
 
       .run-header {
-        font-size: 0.75em;
-        color: var(--color-text-secondary);
-        padding: 4px 10px;
-        border: 1px solid rgba(0,0,0,0.1);
-        border-radius: 12px;
-        background: rgba(0,0,0,0.04);
-        width: 100%;
+        font-size: var(--font-md);
+        font-weight: 600;
+        color: var(--primary-text-color);
         text-align: center;
+        letter-spacing: 0.5px;
       }
 
       .run-buttons {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: clamp(4px, 1vw, 8px);
         width: 100%;
-        justify-content: flex-end;
+        justify-content: center;
+        flex-wrap: wrap;
       }
 
       .timed-box {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: clamp(4px, 1vw, 6px);
         padding: 4px 6px;
         border: 1px solid rgba(0,0,0,0.15);
         border-radius: 10px;
@@ -1965,13 +1990,14 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .run-btn {
-        padding: 8px 14px;
+        padding: clamp(6px, 1.5vw, 8px) clamp(10px, 2vw, 14px);
         border: none;
         border-radius: 6px;
         font-weight: 600;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         cursor: pointer;
         transition: all 150ms;
+        white-space: nowrap;
       }
       
       .run-btn.continuous {
@@ -1990,23 +2016,23 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .hours-input {
-        width: 52px;
-        padding: 6px;
+        width: clamp(40px, 8vw, 52px);
+        padding: clamp(4px, 1vw, 6px);
         border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
-        font-size: 0.85em;
+        font-size: var(--font-sm);
         text-align: center;
         background: var(--card-background-color, white);
         color: var(--primary-text-color);
       }
       
       .hours-label {
-        font-size: 0.7em;
+        font-size: var(--font-xs);
         color: var(--color-text-secondary);
       }
       
       .countdown {
-        font-size: 0.9em;
+        font-size: var(--font-sm);
         font-weight: 600;
         color: var(--color-primary);
         padding: 4px 8px;
@@ -2022,6 +2048,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         color: var(--color-error);
         cursor: pointer;
         font-weight: 600;
+        font-size: var(--font-sm);
       }
       
       /* SCHEDULE SECTION */
@@ -2034,13 +2061,14 @@ class AromaLinkScheduleCard extends HTMLElement {
       .schedule-header {
         display: flex;
         align-items: center;
-        gap: 8px;
+        flex-wrap: wrap;
+        gap: clamp(6px, 1.5vw, 8px);
         margin-bottom: 8px;
       }
       
       .section-title {
         font-weight: 600;
-        font-size: 0.9em;
+        font-size: var(--font-md);
       }
       
       .copy-dropdown {
@@ -2048,25 +2076,26 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .copy-select {
-        padding: 4px 8px;
+        padding: clamp(3px, 0.8vw, 4px) clamp(6px, 1.5vw, 8px);
         border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
-        font-size: 0.75em;
+        font-size: var(--font-xs);
         background: var(--card-background-color, white);
         color: var(--primary-text-color);
         cursor: pointer;
       }
       
       .chip-btn {
-        padding: 4px 10px;
+        padding: clamp(3px, 0.8vw, 4px) clamp(8px, 2vw, 10px);
         border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 12px;
         background: var(--card-background-color, white);
         color: var(--primary-text-color);
-        font-size: 0.7em;
+        font-size: var(--font-xs);
         font-weight: 500;
         cursor: pointer;
         transition: all 150ms;
+        white-space: nowrap;
       }
       
       .chip-btn:hover:not(:disabled) {
@@ -2090,13 +2119,13 @@ class AromaLinkScheduleCard extends HTMLElement {
         border-color: rgba(244, 67, 54, 0.2);
       }
       
-      /* LEGEND */
+      /* LEGEND - Compact on mobile */
       .legend {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: clamp(6px, 1.5vw, 10px);
         margin-bottom: 8px;
-        font-size: 0.65em;
+        font-size: var(--font-xs);
         color: var(--color-text-secondary);
       }
       
@@ -2107,10 +2136,11 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .legend-dot {
-        width: 10px;
-        height: 10px;
+        width: clamp(8px, 2vw, 10px);
+        height: clamp(8px, 2vw, 10px);
         border-radius: 2px;
         border: 1px solid rgba(0,0,0,0.1);
+        flex-shrink: 0;
       }
       
       .legend-dot.enabled {
@@ -2133,12 +2163,41 @@ class AromaLinkScheduleCard extends HTMLElement {
         border-color: var(--color-primary);
       }
       
-      /* GRID */
+      /* GRID - Responsive with horizontal scroll on mobile */
+      .schedule-grid-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x mandatory;
+        margin: 0 calc(-1 * var(--spacing));
+        padding: 0 var(--spacing);
+        scrollbar-width: thin;
+      }
+      
+      .schedule-grid-wrapper::-webkit-scrollbar {
+        height: 4px;
+      }
+      
+      .schedule-grid-wrapper::-webkit-scrollbar-thumb {
+        background: rgba(0,0,0,0.2);
+        border-radius: 2px;
+      }
+      
       .schedule-grid {
         display: grid;
-        grid-template-columns: 28px repeat(7, 1fr);
-        gap: 2px;
+        grid-template-columns: clamp(24px, 5vw, 32px) repeat(7, minmax(var(--cell-min-width), 1fr));
+        gap: clamp(1px, 0.5vw, 3px);
         margin-bottom: 8px;
+        min-width: max-content;
+      }
+      
+      /* On wider screens, don't need scroll */
+      @container (min-width: 600px) {
+        .schedule-grid-wrapper {
+          overflow-x: visible;
+        }
+        .schedule-grid {
+          min-width: 0;
+        }
       }
       
       .grid-cell {
@@ -2146,21 +2205,26 @@ class AromaLinkScheduleCard extends HTMLElement {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 4px 2px;
+        padding: clamp(3px, 0.6vw, 5px) clamp(2px, 0.4vw, 4px);
         border-radius: 4px;
-        min-height: 44px;
+        min-height: var(--cell-height);
         transition: all 150ms;
         text-align: center;
+        scroll-snap-align: start;
+        gap: 0;
       }
       
       .grid-cell.header {
         background: var(--color-surface);
         color: var(--primary-text-color);
         font-weight: 600;
-        font-size: 0.8em;
-        min-height: 22px;
+        font-size: var(--font-sm);
+        min-height: clamp(20px, 4vw, 26px);
         text-transform: none;
         text-shadow: 0 1px 1px rgba(0,0,0,0.1);
+        position: sticky;
+        top: 0;
+        z-index: 2;
       }
       
       .grid-cell.header.today {
@@ -2170,6 +2234,16 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .grid-cell.corner {
         background: transparent;
+        position: sticky;
+        left: 0;
+        z-index: 3;
+      }
+      
+      .grid-cell.program-label {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        background: var(--color-surface);
       }
       
       .grid-cell.program-label,
@@ -2225,32 +2299,59 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .schedule-cell:hover {
-        transform: scale(1.03);
+        transform: scale(1.02);
         z-index: 1;
       }
       
-      .schedule-cell .cell-time {
-        font-weight: 600;
-        font-size: clamp(0.7rem, 1.9vw, 0.9rem);
-        line-height: 1.1;
-        white-space: nowrap;
-        color: var(--primary-text-color);
-        text-shadow: 0 1px 1px rgba(0,0,0,0.12);
+      .schedule-cell:active {
+        transform: scale(0.98);
       }
       
-      .schedule-cell .cell-meta {
-        font-size: clamp(0.65rem, 1.7vw, 0.8rem);
-        font-weight: 600;
-        opacity: 1;
+      /* Cell content - stacked vertically */
+      .schedule-cell .cell-start,
+      .schedule-cell .cell-end {
+        font-weight: 700;
+        font-size: var(--font-sm);
+        line-height: 1.15;
         color: var(--primary-text-color);
-        white-space: nowrap;
-        text-shadow: 0 1px 1px rgba(0,0,0,0.12);
+        text-shadow: 0 1px 1px rgba(0,0,0,0.1);
+      }
+      
+      .schedule-cell .cell-end {
+        font-weight: 500;
+        opacity: 0.85;
+      }
+      
+      .schedule-cell .cell-work {
+        font-size: var(--font-xs);
+        font-weight: 600;
+        color: var(--primary-text-color);
+        opacity: 0.9;
+        margin-top: 1px;
+      }
+      
+      .schedule-cell .cell-level {
+        font-size: var(--font-xs);
+        font-weight: 700;
+        color: var(--color-primary);
+        opacity: 0.9;
       }
       
       .schedule-cell .off-label {
-        font-size: 0.6rem;
+        font-size: var(--font-xs);
         opacity: 0.5;
         font-weight: 600;
+      }
+      
+      /* On very narrow cells, combine start/end on same row */
+      @container (min-width: 600px) {
+        .schedule-cell .cell-start::after {
+          content: '-';
+          margin: 0 1px;
+        }
+        .schedule-cell .cell-end {
+          display: inline;
+        }
       }
       
       /* SELECTION BAR */
@@ -2258,7 +2359,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px;
+        gap: clamp(4px, 1vw, 6px);
         margin-bottom: 8px;
       }
       
@@ -2267,16 +2368,16 @@ class AromaLinkScheduleCard extends HTMLElement {
         background: rgba(255, 152, 0, 0.15);
         color: #e65100;
         border-radius: 10px;
-        font-size: 0.7em;
+        font-size: var(--font-xs);
         font-weight: 600;
       }
       
       /* STATUS */
       .status-message {
-        padding: 8px 12px;
+        padding: clamp(6px, 1.5vw, 8px) clamp(8px, 2vw, 12px);
         border-radius: var(--radius-sm);
         margin-bottom: 8px;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         font-weight: 500;
       }
       
@@ -2290,11 +2391,11 @@ class AromaLinkScheduleCard extends HTMLElement {
         color: #c62828;
       }
       
-      /* EDITOR */
+      /* EDITOR - Responsive */
       .editor-section {
         background: var(--color-surface);
         border-radius: var(--radius-sm);
-        padding: 10px;
+        padding: clamp(8px, 2vw, 10px);
         transition: opacity 200ms;
       }
       
@@ -2303,7 +2404,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .editor-header {
-        font-size: 0.75em;
+        font-size: var(--font-xs);
         color: var(--color-text-secondary);
         margin-bottom: 8px;
       }
@@ -2312,7 +2413,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 10px;
+        gap: clamp(6px, 1.5vw, 10px);
         margin-bottom: 10px;
       }
       
@@ -2320,13 +2421,13 @@ class AromaLinkScheduleCard extends HTMLElement {
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         font-weight: 500;
       }
       
       .toggle-label input {
-        width: 16px;
-        height: 16px;
+        width: clamp(14px, 3vw, 18px);
+        height: clamp(14px, 3vw, 18px);
       }
       
       .time-inputs {
@@ -2342,70 +2443,83 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .time-input {
-        padding: 4px 6px;
+        padding: clamp(3px, 0.8vw, 4px) clamp(4px, 1vw, 6px);
         border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
-        font-size: 0.8em;
-        width: 85px;
+        font-size: var(--font-sm);
+        width: clamp(70px, 15vw, 85px);
         background: var(--card-background-color, white);
         color: var(--primary-text-color);
       }
       
       .num-inputs {
         display: flex;
-        gap: 6px;
+        gap: clamp(4px, 1vw, 6px);
+        flex-wrap: wrap;
       }
       
       .num-inputs label {
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 0.75em;
+        font-size: var(--font-xs);
         color: var(--color-text-secondary);
       }
       
       .num-input {
-        width: 50px;
-        padding: 4px;
+        width: clamp(40px, 10vw, 50px);
+        padding: clamp(3px, 0.8vw, 4px);
         border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         text-align: center;
         background: var(--card-background-color, white);
         color: var(--primary-text-color);
       }
       
       .level-select {
-        padding: 4px 8px;
+        padding: clamp(3px, 0.8vw, 4px) clamp(6px, 1.5vw, 8px);
         border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         background: var(--card-background-color, white);
         color: var(--primary-text-color);
       }
 
       .level-label {
-        font-size: 0.75em;
+        font-size: var(--font-xs);
         color: var(--color-text-secondary);
         margin-left: 4px;
       }
       
-      /* INLINE ACTIONS */
+      /* INLINE ACTIONS - Stack on mobile */
       .inline-actions {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: clamp(4px, 1vw, 6px);
         flex-wrap: wrap;
+        width: 100%;
+      }
+      
+      @container (max-width: 400px) {
+        .inline-actions {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .inline-actions .push-btn {
+          margin-left: 0;
+        }
       }
       
       .stage-btn, .clear-btn, .push-btn {
-        padding: 6px 10px;
+        padding: clamp(5px, 1.2vw, 6px) clamp(8px, 2vw, 10px);
         border: none;
         border-radius: 16px;
-        font-size: 0.75em;
+        font-size: var(--font-xs);
         font-weight: 600;
         cursor: pointer;
         transition: all 150ms;
+        white-space: nowrap;
       }
       
       .stage-btn {
@@ -2444,9 +2558,9 @@ class AromaLinkScheduleCard extends HTMLElement {
         box-shadow: none !important;
       }
       
-      /* OIL TRACKING SECTION */
+      /* OIL TRACKING SECTION - Responsive */
       .oil-section {
-        padding: 12px 16px;
+        padding: var(--spacing);
         border-top: 1px solid rgba(0,0,0,0.05);
       }
       
@@ -2454,11 +2568,12 @@ class AromaLinkScheduleCard extends HTMLElement {
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 12px;
+        margin-bottom: var(--spacing);
+        flex-wrap: wrap;
       }
       
       .calibration-badge {
-        font-size: 0.7em;
+        font-size: var(--font-xs);
         padding: 2px 8px;
         border-radius: 10px;
         font-weight: 600;
@@ -2486,17 +2601,32 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .oil-content {
         display: flex;
-        gap: 16px;
+        gap: var(--spacing);
         align-items: flex-start;
+      }
+      
+      /* Stack vertically on mobile */
+      @container (max-width: 450px) {
+        .oil-content {
+          flex-direction: column;
+        }
+        .oil-left {
+          flex-direction: row;
+          width: 100%;
+          max-width: none;
+          justify-content: space-between;
+        }
+        .oil-summary {
+          flex: 1;
+        }
       }
 
       .oil-left {
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: var(--spacing);
         align-items: center;
-        flex: 0 0 25%;
-        max-width: 160px;
+        flex: 0 0 clamp(100px, 25%, 160px);
       }
 
       .oil-right {
@@ -2509,11 +2639,12 @@ class AromaLinkScheduleCard extends HTMLElement {
         flex-direction: column;
         align-items: center;
         gap: 4px;
+        flex-shrink: 0;
       }
       
       .bottle {
-        width: 50px;
-        height: 80px;
+        width: clamp(40px, 10vw, 50px);
+        height: clamp(64px, 16vw, 80px);
         border: 2px solid var(--secondary-text-color, #666);
         border-radius: 0 0 10px 10px;
         position: relative;
@@ -2528,7 +2659,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         top: -8px;
         left: 50%;
         transform: translateX(-50%);
-        width: 24px;
+        width: clamp(18px, 5vw, 24px);
         height: 10px;
         border: 2px solid var(--secondary-text-color, #666);
         border-bottom: none;
@@ -2591,14 +2722,14 @@ class AromaLinkScheduleCard extends HTMLElement {
         flex-direction: column;
         gap: 4px;
         width: 100%;
-        font-size: 0.75em;
+        font-size: var(--font-xs);
       }
 
       .summary-row {
         display: flex;
         justify-content: space-between;
-        gap: 10px;
-        font-size: 0.8em;
+        gap: clamp(6px, 1.5vw, 10px);
+        font-size: var(--font-sm);
       }
 
       .summary-label {
@@ -2613,7 +2744,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       .stat-row {
         display: flex;
         justify-content: space-between;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         padding: 2px 0;
       }
       
@@ -2633,7 +2764,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         color: var(--disabled-text-color, #999);
       }
       
-      /* Calibration Panel */
+      /* Calibration Panel - Responsive */
       .calibration-panel {
         border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 8px;
@@ -2643,10 +2774,10 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .calibration-panel summary {
-        padding: 10px 14px;
+        padding: clamp(8px, 2vw, 10px) clamp(10px, 2.5vw, 14px);
         background: var(--secondary-background-color, rgba(0,0,0,0.03));
         cursor: pointer;
-        font-size: 0.85em;
+        font-size: var(--font-sm);
         font-weight: 600;
         color: var(--primary-text-color);
         list-style: none;
@@ -2657,7 +2788,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .calibration-panel summary::before {
         content: '▶';
-        font-size: 0.7em;
+        font-size: var(--font-xs);
         transition: transform 200ms;
       }
       
@@ -2670,10 +2801,10 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .calibration-content {
-        padding: 14px;
+        padding: clamp(10px, 2.5vw, 14px);
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 10px 16px;
+        grid-template-columns: repeat(auto-fit, minmax(clamp(140px, 35vw, 180px), 1fr));
+        gap: clamp(8px, 2vw, 10px) clamp(10px, 2.5vw, 16px);
       }
       
       .calibration-row {
@@ -2681,7 +2812,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         justify-content: space-between;
         align-items: center;
         margin-bottom: 0;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
       }
       
       .calibration-row label {
@@ -2695,30 +2826,31 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .oil-input {
-        width: 70px;
-        padding: 4px 6px;
+        width: clamp(55px, 14vw, 70px);
+        padding: clamp(3px, 0.8vw, 4px) clamp(4px, 1vw, 6px);
         border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
         border-radius: 4px;
-        font-size: 0.9em;
+        font-size: var(--font-sm);
         text-align: right;
         background: var(--card-background-color, white);
         color: var(--primary-text-color);
       }
 
       .oil-input.date {
-        width: 120px;
+        width: clamp(100px, 25vw, 120px);
         text-align: left;
       }
       
       .input-group span {
         color: var(--secondary-text-color, #666);
-        font-size: 0.9em;
+        font-size: var(--font-sm);
       }
       
       .calibration-actions {
         display: flex;
-        gap: 8px;
-        margin-top: 12px;
+        flex-wrap: wrap;
+        gap: clamp(6px, 1.5vw, 8px);
+        margin-top: var(--spacing);
         grid-column: 1 / -1;
       }
 
@@ -2729,18 +2861,20 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .oil-btn {
         flex: 1;
-        padding: 8px 12px;
+        min-width: clamp(80px, 20vw, 100px);
+        padding: clamp(6px, 1.5vw, 8px) clamp(8px, 2vw, 12px);
         border: none;
         border-radius: 6px;
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         font-weight: 500;
         cursor: pointer;
         transition: all 150ms;
+        white-space: nowrap;
       }
 
       .oil-btn.small-btn {
-        padding: 6px 10px;
-        font-size: 0.75em;
+        padding: clamp(4px, 1vw, 6px) clamp(8px, 2vw, 10px);
+        font-size: var(--font-xs);
         background: var(--secondary-background-color, rgba(0,0,0,0.05));
         color: var(--primary-text-color, #555);
       }

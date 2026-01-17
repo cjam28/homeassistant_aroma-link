@@ -159,7 +159,8 @@ class AromaLinkOilFillDate(CoordinatorEntity, TextEntity):
         self._unique_id = f"{entry.data['username']}_{device_id}_oil_fill_date"
         self._attr_native_min = 0
         self._attr_native_max = 10  # "YYYY-MM-DD"
-        self._attr_pattern = r"^\\d{4}-\\d{2}-\\d{2}$"
+        # Pattern for YYYY-MM-DD format (optional - None is allowed)
+        self._attr_pattern = r"^\d{4}-\d{2}-\d{2}$"
         self._attr_icon = "mdi:calendar"
         self._attr_entity_category = EntityCategory.CONFIG
 
@@ -175,8 +176,10 @@ class AromaLinkOilFillDate(CoordinatorEntity, TextEntity):
 
     @property
     def native_value(self):
-        """Return the fill date."""
-        return self.coordinator.get_oil_calibration().get("fill_date") or ""
+        """Return the fill date or None if not set."""
+        fill_date = self.coordinator.get_oil_calibration().get("fill_date")
+        # Return None instead of empty string to avoid pattern validation issues
+        return fill_date if fill_date else None
 
     @property
     def device_info(self):
