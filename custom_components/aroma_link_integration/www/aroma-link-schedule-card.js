@@ -74,13 +74,30 @@ class AromaLinkScheduleCard extends HTMLElement {
 
   _setOilInputValue(deviceName, field, value) {
     const values = this._getOilInputValues(deviceName);
-    values[field] = value;
+    // For date fields, only store valid yyyy-MM-dd values
+    if (field === 'fillDate') {
+      if (value && typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        values[field] = value;
+      } else {
+        values[field] = ''; // Store empty string for invalid dates
+      }
+    } else {
+      values[field] = value;
+    }
   }
 
   _readOilInputValue(deviceName, field, fallbackValue) {
     const values = this._getOilInputValues(deviceName);
     if (values[field] !== undefined && values[field] !== null && values[field] !== '') {
+      // For date fields, validate format before returning
+      if (field === 'fillDate') {
+        return /^\d{4}-\d{2}-\d{2}$/.test(values[field]) ? values[field] : '';
+      }
       return values[field];
+    }
+    // For date fields, validate fallback too
+    if (field === 'fillDate') {
+      return (fallbackValue && typeof fallbackValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fallbackValue)) ? fallbackValue : '';
     }
     return fallbackValue;
   }
@@ -883,7 +900,8 @@ class AromaLinkScheduleCard extends HTMLElement {
     ) || 0;
     // Handle "unknown" or "unavailable" states for date input (must be empty string or valid date)
     const rawFillDate = this._readOilInputValue(sensor.deviceName, 'fillDate', fillDateState?.state || '');
-    const fillDate = (rawFillDate && rawFillDate !== 'unknown' && rawFillDate !== 'unavailable' && /^\d{4}-\d{2}-\d{2}$/.test(rawFillDate)) ? rawFillDate : '';
+    // Strict validation: only accept yyyy-MM-dd format, reject everything else including unknown/unavailable/null/undefined
+    const fillDate = (rawFillDate && typeof rawFillDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawFillDate)) ? rawFillDate : '';
     const manualStart = parseFloat(
       this._readOilInputValue(sensor.deviceName, 'manualStart', manualStartState?.state)
     ) || 0;
