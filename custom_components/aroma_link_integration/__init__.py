@@ -709,6 +709,111 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
 
     # ============================================================
+    # BATCH SAVE SERVICE - Direct schedule save bypassing entities
+    # ============================================================
+    
+    async def save_schedule_batch_service(call: ServiceCall):
+        """Save schedule directly to device - FAST batch operation.
+        
+        This bypasses the entity-based flow for maximum speed.
+        Accepts full schedule data and batches days with identical schedules.
+        """
+        device_id = call.data.get("device_id")
+        schedules = call.data.get("schedules", [])
+        
+        coordinator = None
+        if device_id and device_id in device_coordinators:
+            coordinator = device_coordinators[device_id]
+        elif len(device_coordinators) == 1:
+            coordinator = list(device_coordinators.values())[0]
+        else:
+            _LOGGER.error("Multiple devices available, must specify device_id")
+            return {"success": False, "error": "device_id required"}
+        
+        if not schedules:
+            return {"success": False, "error": "No schedules provided"}
+        
+        import json
+        
+        # Group schedules by identical work_time_list for batching
+        schedule_groups = {}  # JSON key -> (days, work_time_list)
+        
+        for schedule_item in schedules:
+            day = schedule_item.get("day")
+            programs = schedule_item.get("programs", [])
+            
+            if day is None or not programs:
+                continue
+            
+            # Build work_time_list for this day
+            level_map = {"A": "1", "B": "2", "C": "3", 1: "1", 2: "2", 3: "3"}
+            work_time_list = []
+            
+            for prog in programs:
+                work_time_list.append({
+                    "startTime": prog.get("startTime", "00:00"),
+                    "endTime": prog.get("endTime", "23:59"),
+                    "enabled": prog.get("enabled", 0),
+                    "consistenceLevel": level_map.get(prog.get("level", "A"), "1"),
+                    "workDuration": str(prog.get("workSec", 10)),
+                    "pauseDuration": str(prog.get("pauseSec", 120))
+                })
+            
+            # Pad to 5 programs if needed
+            while len(work_time_list) < 5:
+                work_time_list.append({
+                    "startTime": "00:00", "endTime": "23:59",
+                    "enabled": 0, "consistenceLevel": "1",
+                    "workDuration": "10", "pauseDuration": "120"
+                })
+            
+            # Create hash key for grouping
+            schedule_key = json.dumps(work_time_list, sort_keys=True)
+            if schedule_key not in schedule_groups:
+                schedule_groups[schedule_key] = ([], work_time_list)
+            schedule_groups[schedule_key][0].append(day)
+        
+        # Make batched API calls
+        total_days = sum(len(days) for days, _ in schedule_groups.values())
+        _LOGGER.info(f"Batch save: {total_days} days grouped into {len(schedule_groups)} API calls")
+        
+        success_count = 0
+        for schedule_key, (days, work_time_list) in schedule_groups.items():
+            _LOGGER.info(f"Saving days {days} in single API call")
+            result = await coordinator.set_workset(days, work_time_list, skip_refresh=True)
+            if result:
+                success_count += len(days)
+        
+        # Single refresh at end
+        await coordinator.async_request_refresh()
+        await coordinator.async_fetch_all_schedules()
+        
+        _LOGGER.info(f"Batch save complete: {success_count}/{total_days} days saved")
+        return {"success": True, "days_saved": success_count, "api_calls": len(schedule_groups)}
+    
+    SAVE_SCHEDULE_BATCH_SCHEMA = vol.Schema({
+        vol.Optional("device_id"): cv.string,
+        vol.Required("schedules"): vol.All(cv.ensure_list, [vol.Schema({
+            vol.Required("day"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
+            vol.Required("programs"): vol.All(cv.ensure_list, [vol.Schema({
+                vol.Optional("startTime", default="00:00"): cv.string,
+                vol.Optional("endTime", default="23:59"): cv.string,
+                vol.Optional("enabled", default=0): vol.Coerce(int),
+                vol.Optional("level", default="A"): cv.string,
+                vol.Optional("workSec", default=10): vol.Coerce(int),
+                vol.Optional("pauseSec", default=120): vol.Coerce(int),
+            })]),
+        })]),
+    })
+    
+    hass.services.async_register(
+        DOMAIN,
+        "save_schedule_batch",
+        save_schedule_batch_service,
+        schema=SAVE_SCHEDULE_BATCH_SCHEMA
+    )
+
+    # ============================================================
     # TIMED RUN SERVICES (server-side timer, survives browser close)
     # ============================================================
     

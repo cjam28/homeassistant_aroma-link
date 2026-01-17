@@ -1020,7 +1020,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 f"Error fetching workset for device {self.device_id}: {e}")
             return None
 
-    async def set_workset(self, week_days, work_time_list):
+    async def set_workset(self, week_days, work_time_list, skip_refresh=False):
         """Set workset schedule for specified days.
         
         Args:
@@ -1032,6 +1032,7 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                 - workDuration: string (seconds)
                 - pauseDuration: string (seconds)
                 - consistenceLevel: "1", "2", or "3" (A, B, or C)
+            skip_refresh: If True, skip the automatic refresh after save (for batch operations)
                 
         Returns:
             True if successful, False otherwise
@@ -1103,7 +1104,8 @@ class AromaLinkDeviceCoordinator(DataUpdateCoordinator):
                             if day in self._schedule_cache:
                                 del self._schedule_cache[day]
                                 _LOGGER.debug(f"Cleared schedule cache for day {day}")
-                        await self.async_request_refresh()
+                        if not skip_refresh:
+                            await self.async_request_refresh()
                         return True
                     else:
                         _LOGGER.error(

@@ -147,7 +147,7 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
         )
 
     async def async_press(self):
-        """Save the program to selected days."""
+        """Save the program to selected days - OPTIMIZED to batch days with identical schedules."""
         program_num = self.coordinator._current_program
         current_day = self.coordinator._current_day
         selected_days = self.coordinator._selected_days
@@ -157,7 +157,6 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
             return
 
         # First, capture the edited program data from the cache (before any API calls)
-        # This is the data the user has edited via the UI entities
         edited_program = None
         if current_day in self.coordinator._schedule_cache:
             current_schedule = self.coordinator._schedule_cache[current_day]
@@ -179,13 +178,17 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
             edited_program.get("level")
         )
 
-        # For each selected day, fetch that day's full schedule, merge in edited program, save
+        # Step 1: Build the final schedule for each day
+        import json
+        day_schedules = {}  # day -> (schedule_list, work_time_list)
+        
         for day in selected_days:
-            # For the current_day, use existing cache; for others, fetch fresh
+            # Get base schedule for this day
             if day == current_day:
                 schedule = self.coordinator._schedule_cache.get(day)
+                if schedule:
+                    schedule = [prog.copy() for prog in schedule]  # Deep copy
             else:
-                # Fetch fresh schedule for this day (don't overwrite current_day cache)
                 schedule = await self.coordinator.fetch_workset_for_day(day)
 
             if not schedule:
@@ -203,9 +206,9 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
             }
 
             # Convert to API format
+            level_map = {1: "1", 2: "2", 3: "3"}
             work_time_list = []
             for prog in schedule:
-                level_map = {1: "1", 2: "2", 3: "3"}
                 work_time_list.append({
                     "startTime": prog.get("start_time", "00:00"),
                     "endTime": prog.get("end_time", "23:59"),
@@ -214,17 +217,37 @@ class AromaLinkSaveProgramButton(CoordinatorEntity, ButtonEntity):
                     "workDuration": str(prog.get("work_sec", 10)),
                     "pauseDuration": str(prog.get("pause_sec", 120))
                 })
+            
+            day_schedules[day] = (schedule, work_time_list)
 
-            # Save this day
-            result = await self.coordinator.set_workset([day], work_time_list)
+        # Step 2: Group days by identical work_time_list (batch them!)
+        schedule_groups = {}  # JSON hash -> (days_list, work_time_list, schedules)
+        for day, (schedule, work_time_list) in day_schedules.items():
+            # Create a hash of the schedule for grouping
+            schedule_key = json.dumps(work_time_list, sort_keys=True)
+            if schedule_key not in schedule_groups:
+                schedule_groups[schedule_key] = ([], work_time_list, {})
+            schedule_groups[schedule_key][0].append(day)
+            schedule_groups[schedule_key][2][day] = schedule
+
+        # Step 3: Make ONE API call per unique schedule (batching multiple days!)
+        _LOGGER.info("Optimized: %d days grouped into %d API calls", len(selected_days), len(schedule_groups))
+        
+        for schedule_key, (days, work_time_list, schedules) in schedule_groups.items():
+            _LOGGER.info("Saving to days %s in single API call", days)
+            
+            # BATCH: Send multiple days in one call!
+            result = await self.coordinator.set_workset(days, work_time_list, skip_refresh=True)
             if result:
-                _LOGGER.info("Saved program %s to day %s", program_num, day)
-                # Update cache for this day
-                self.coordinator._schedule_cache[day] = schedule
+                _LOGGER.info("Saved program %s to days %s", program_num, days)
+                # Update cache for all days in this batch
+                for day in days:
+                    self.coordinator._schedule_cache[day] = schedules[day]
             else:
-                _LOGGER.error("Failed to save program %s to day %s", program_num, day)
+                _LOGGER.error("Failed to save program %s to days %s", program_num, days)
 
-        # Refresh the current day to reflect saved changes
+        # Single refresh at the end
+        await self.coordinator.async_request_refresh()
         await self.coordinator.async_refresh_schedule(current_day)
         self.coordinator.async_update_listeners()
 

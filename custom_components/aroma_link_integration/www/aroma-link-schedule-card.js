@@ -1,14 +1,16 @@
 /**
- * Aroma-Link Schedule Card v2.5.0
+ * Aroma-Link Schedule Card v2.6.0
  * 
  * A complete dashboard card for Aroma-Link diffusers including:
- * - Compact manual controls (Power, Fan, Work/Pause, Run options in one row)
+ * - Compact manual controls (Power applies work/pause, Fan, Timed Run)
  * - Schedule matrix with multi-cell editing and LOCAL STAGING
- * - Stage Edits → Push Schedule workflow (bulk operations)
+ * - Stage Edits → Sync Staged workflow (bulk operations)
  * - Copy schedule from another diffuser
  * - SERVER-SIDE timed run (survives browser close!)
  * - OIL LEVEL TRACKING with bottle visualization and calibration
  * - RESPONSIVE DESIGN: Fluid typography & layout for mobile/tablet/desktop
+ * - Optimized rendering (debounced, surgical updates for countdown)
+ * - Safari/iOS scroll fix with proper touch handling
  * 
  * Styled to match Mushroom/button-card aesthetics.
  * Auto-discovers all Aroma-Link devices - no configuration needed!
@@ -39,6 +41,17 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     // Local oil input values to prevent reset while typing
     this._oilInputValuesByDevice = new Map();
+  }
+
+  // Lifecycle: cleanup timers when card is removed from DOM
+  disconnectedCallback() {
+    // Clear all interval timers to prevent memory leaks
+    for (const [deviceName, timerState] of this._timersByDevice.entries()) {
+      if (timerState?.intervalId) {
+        clearInterval(timerState.intervalId);
+      }
+    }
+    this._timersByDevice.clear();
   }
 
   _getTimedRunHours(deviceName) {
@@ -195,8 +208,11 @@ class AromaLinkScheduleCard extends HTMLElement {
           // Timer complete - clear local display (server already turned off device)
           this._clearLocalTimer(deviceName);
           this._showStatus('Timer complete - turned off', false, deviceName);
+          this.render();
+        } else {
+          // Just update the countdown display without full re-render
+          this._updateCountdownDisplay(deviceName, remaining);
         }
-        this.render();
       }, 1000);
       
       this._timersByDevice.set(deviceName, timerState);
@@ -214,6 +230,21 @@ class AromaLinkScheduleCard extends HTMLElement {
       clearInterval(timerState.intervalId);
     }
     this._timersByDevice.delete(deviceName);
+  }
+
+  _updateCountdownDisplay(deviceName, seconds) {
+    // Surgically update just the countdown element without re-rendering
+    const countdownEl = this.shadowRoot?.querySelector(`.countdown[data-device="${deviceName}"]`);
+    if (countdownEl) {
+      countdownEl.textContent = `⏱️ ${this._formatCountdown(seconds)}`;
+    } else {
+      // Countdown element not found, might need full render
+      // But check if the container exists to avoid unnecessary renders
+      const runPanel = this.shadowRoot?.querySelector(`.run-panel[data-device="${deviceName}"]`);
+      if (runPanel) {
+        this.render();
+      }
+    }
   }
 
   async _cancelTimer(deviceName, deviceId) {
@@ -569,7 +600,7 @@ class AromaLinkScheduleCard extends HTMLElement {
     return { ...this._getCellDataFromMatrix(sensor, day, prog), isStaged: false };
   }
 
-  // PUSH: Send all staged changes to API
+  // PUSH: Send all staged changes to API using FAST batch service
   async _pushStagedChanges(sensor) {
     const staged = this._getStagedChanges(sensor.deviceName);
     if (staged.size === 0) {
@@ -588,7 +619,7 @@ class AromaLinkScheduleCard extends HTMLElement {
     this.render();
 
     try {
-      // Group staged changes by day
+      // Group staged changes by day and build full schedule for each day
       const changesByDay = {};
       for (const [key, data] of staged.entries()) {
         const [day, prog] = key.split('-').map(Number);
@@ -596,134 +627,64 @@ class AromaLinkScheduleCard extends HTMLElement {
         changesByDay[day][prog] = data;
       }
 
-      // For each day that has changes, build full 5-program schedule and push
-      const daySwitches = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-      let savedDays = 0;
-      const totalDays = Object.keys(changesByDay).length;
-      console.log(`[AromaLink] Starting push: ${totalDays} day(s) to update`);
+      // Build complete schedules for each day (merge staged with existing)
+      const schedules = [];
+      const matrix = sensor.matrix || {};
+      const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
       for (const [dayStr, programs] of Object.entries(changesByDay)) {
         const day = parseInt(dayStr);
-        console.log(`[AromaLink] Processing day ${day} (${daySwitches[day]})...`);
+        const dayName = dayNames[day];
+        const dayMatrix = matrix[dayName] || {};
         
-        // Pick first program to set as current for the API
-        const firstProg = Object.keys(programs)[0];
-        
-        // Set editor program
-        await this._hass.callService('aroma_link_integration', 'set_editor_program', {
-          device_id: deviceId,
-          day: day,
-          program: parseInt(firstProg)
-        });
-        await new Promise(r => setTimeout(r, 20));
-
-        // For each program in this day, update entities
-        for (const [progStr, data] of Object.entries(programs)) {
-          const prog = parseInt(progStr);
+        // Build 5 programs for this day
+        const dayPrograms = [];
+        for (let prog = 1; prog <= 5; prog++) {
+          // Use staged data if available, otherwise use existing matrix data
+          const stagedData = programs[prog];
+          const existingData = dayMatrix[`program${prog}`] || {};
           
-          // Set this program as current
-          await this._hass.callService('aroma_link_integration', 'set_editor_program', {
-            device_id: deviceId,
-            day: day,
-            program: prog
-          });
-          await new Promise(r => setTimeout(r, 10));
-
-          const prefix = sensor.deviceName;
-          
-          // Update all entities in parallel (faster)
-          const promises = [];
-          
-          const enabledEntity = `switch.${prefix}_program_enabled`;
-          if (this._hass.states[enabledEntity]) {
-            promises.push(this._hass.callService('switch', data.enabled ? 'turn_on' : 'turn_off', {
-              entity_id: enabledEntity
-            }));
-          }
-          
-          const startEntity = `text.${prefix}_program_start_time`;
-          if (this._hass.states[startEntity]) {
-            promises.push(this._hass.callService('text', 'set_value', {
-              entity_id: startEntity,
-              value: data.startTime
-            }));
-          }
-          
-          const endEntity = `text.${prefix}_program_end_time`;
-          if (this._hass.states[endEntity]) {
-            promises.push(this._hass.callService('text', 'set_value', {
-              entity_id: endEntity,
-              value: data.endTime
-            }));
-          }
-          
-          const workEntity = `number.${prefix}_program_work_time`;
-          if (this._hass.states[workEntity]) {
-            promises.push(this._hass.callService('number', 'set_value', {
-              entity_id: workEntity,
-              value: data.workSec
-            }));
-          }
-          
-          const pauseEntity = `number.${prefix}_program_pause_time`;
-          if (this._hass.states[pauseEntity]) {
-            promises.push(this._hass.callService('number', 'set_value', {
-              entity_id: pauseEntity,
-              value: data.pauseSec
-            }));
-          }
-          
-          const levelEntity = `select.${prefix}_program_level`;
-          if (this._hass.states[levelEntity]) {
-            promises.push(this._hass.callService('select', 'select_option', {
-              entity_id: levelEntity,
-              option: data.level
-            }));
-          }
-          
-          await Promise.all(promises);
-          await new Promise(r => setTimeout(r, 10));
-        }
-        
-        // Turn off all day switches, then on just this day
-        for (let d = 0; d < 7; d++) {
-          const switchEntity = `switch.${sensor.deviceName}_program_${daySwitches[d]}`;
-          if (this._hass.states[switchEntity]) {
-            await this._hass.callService('switch', 'turn_off', { entity_id: switchEntity });
+          if (stagedData) {
+            dayPrograms.push({
+              startTime: stagedData.startTime || '00:00',
+              endTime: stagedData.endTime || '23:59',
+              enabled: stagedData.enabled ? 1 : 0,
+              level: stagedData.level || 'A',
+              workSec: stagedData.workSec || 10,
+              pauseSec: stagedData.pauseSec || 120
+            });
+          } else {
+            // Use existing data from matrix
+            dayPrograms.push({
+              startTime: existingData.startTime || '00:00',
+              endTime: existingData.endTime || '23:59',
+              enabled: existingData.enabled ? 1 : 0,
+              level: existingData.level || 'A',
+              workSec: existingData.workSec || 10,
+              pauseSec: existingData.pauseSec || 120
+            });
           }
         }
         
-        const daySwitch = `switch.${sensor.deviceName}_program_${daySwitches[day]}`;
-        if (this._hass.states[daySwitch]) {
-          await this._hass.callService('switch', 'turn_on', { entity_id: daySwitch });
-        }
-        
-        await new Promise(r => setTimeout(r, 20));
-        
-        // Save this day
-        const saveButton = `button.${sensor.deviceName}_save_program`;
-        if (this._hass.states[saveButton]) {
-          await this._hass.callService('button', 'press', { entity_id: saveButton });
-        }
-        
-        await new Promise(r => setTimeout(r, 150));
-        savedDays++;
-        console.log(`[AromaLink] Day ${day} saved (${savedDays}/${totalDays})`);
-        this._showStatus(`Saving... ${savedDays}/${totalDays} days`, false, sensor.deviceName);
-        this.render();
+        schedules.push({ day: day, programs: dayPrograms });
       }
+
+      const totalDays = schedules.length;
+      console.log(`[AromaLink] Using batch service for ${totalDays} day(s)`);
+      this._showStatus(`Saving ${totalDays} day(s)...`, false, sensor.deviceName);
+
+      // FAST: Single service call that batches everything!
+      await this._hass.callService('aroma_link_integration', 'save_schedule_batch', {
+        device_id: deviceId,
+        schedules: schedules
+      });
       
       // Clear staged changes
       staged.clear();
       
-      // Pull fresh data
-      const syncButton = `button.${sensor.deviceName}_sync_schedules`;
-      if (this._hass.states[syncButton]) {
-        await this._hass.callService('button', 'press', { entity_id: syncButton });
-      }
-      
       this._isSaving = false;
-      this._showStatus(`✓ Pushed ${savedDays} day(s) to Aroma-Link`, false, sensor.deviceName);
+      this._showStatus(`✓ Saved ${totalDays} day(s) to Aroma-Link`, false, sensor.deviceName);
+      console.log(`[AromaLink] Batch save complete`);
       
     } catch (error) {
       console.error('Error pushing changes:', error);
@@ -1203,18 +1164,23 @@ class AromaLinkScheduleCard extends HTMLElement {
   render() {
     if (!this._hass) return;
     
-    // Save scroll position before re-render (fixes Safari/iOS scroll jump)
-    // Try multiple scroll containers that HA might use
-    const possibleContainers = [
-      this.closest('hui-view'),
-      this.closest('.content'),
-      this.closest('main'),
-      document.querySelector('home-assistant')?.shadowRoot?.querySelector('home-assistant-main')?.shadowRoot?.querySelector('ha-panel-lovelace')?.shadowRoot?.querySelector('hui-root')?.shadowRoot?.querySelector('.container'),
-    ].filter(Boolean);
+    // Debounce rapid renders
+    if (this._renderPending) return;
+    this._renderPending = true;
     
-    const scrollContainer = possibleContainers.find(c => c?.scrollTop > 0) || document.scrollingElement || document.documentElement;
-    const savedScrollTop = window.scrollY || scrollContainer?.scrollTop || 0;
-    const savedScrollLeft = window.scrollX || scrollContainer?.scrollLeft || 0;
+    // Use microtask to batch multiple render calls
+    queueMicrotask(() => {
+      this._renderPending = false;
+      this._doRender();
+    });
+  }
+  
+  _doRender() {
+    if (!this._hass) return;
+    
+    // Save scroll position before re-render
+    const savedScrollTop = window.scrollY || window.pageYOffset || 0;
+    const savedScrollLeft = window.scrollX || window.pageXOffset || 0;
     
     // Also save this card's position relative to viewport
     const cardRect = this.getBoundingClientRect?.() || { top: 0 };
@@ -1298,11 +1264,11 @@ class AromaLinkScheduleCard extends HTMLElement {
             </div>
             
             <div class="control-group run-options">
-              <div class="run-panel">
+              <div class="run-panel" data-device="${sensor.deviceName}">
                 <div class="run-header">Run Timed</div>
                 ${timerState ? `
                   <div class="run-buttons">
-                    <span class="countdown">⏱️ ${this._formatCountdown(timerState.remainingSeconds)}</span>
+                    <span class="countdown" data-device="${sensor.deviceName}">⏱️ ${this._formatCountdown(timerState.remainingSeconds)}</span>
                     <button class="cancel-btn" data-action="cancel-timer" data-device="${sensor.deviceName}">Cancel</button>
                   </div>
                 ` : `
@@ -1440,10 +1406,6 @@ class AromaLinkScheduleCard extends HTMLElement {
               
               <!-- Row 2: Actions -->
               <div class="editor-actions-row">
-                <button class="clear-btn ${selectionCount === 0 ? 'disabled' : ''}" 
-                        data-action="clear-schedule" data-device="${sensor.deviceName}">Clear</button>
-                <button class="stage-btn ${selectionCount === 0 ? 'disabled' : ''}" 
-                        data-action="stage" data-device="${sensor.deviceName}">Stage</button>
                 <span class="level-group">
                   <label class="level-label">Level</label>
                   <select class="level-select" data-field="level" data-device="${sensor.deviceName}">
@@ -1452,9 +1414,13 @@ class AromaLinkScheduleCard extends HTMLElement {
                     <option value="C" ${editorValues.level === 'C' ? 'selected' : ''}>C</option>
                   </select>
                 </span>
-                <button class="push-btn ${!hasStagedChanges || this._isSaving ? 'disabled' : ''}" 
+                <button class="clear-btn ${selectionCount === 0 ? 'disabled' : ''}" 
+                        data-action="clear-schedule" data-device="${sensor.deviceName}">Clear Selection</button>
+                <button class="stage-btn ${selectionCount === 0 ? 'disabled' : ''}" 
+                        data-action="stage" data-device="${sensor.deviceName}">Stage Edits</button>
+                <button class="push-btn ${hasStagedChanges ? 'ready' : ''} ${!hasStagedChanges || this._isSaving ? 'disabled' : ''}" 
                         data-action="push" data-device="${sensor.deviceName}">
-                  ${this._isSaving ? 'Saving...' : 'Sync'}
+                  ${this._isSaving ? 'Syncing...' : `Sync Staged (${stagedCount})`}
                 </button>
               </div>
             </div>
@@ -1480,27 +1446,46 @@ class AromaLinkScheduleCard extends HTMLElement {
     this._attachEventListeners();
     
     // Restore scroll position after re-render (fixes Safari/iOS scroll jump)
+    // Use double-RAF for Safari which needs extra frame for layout
     requestAnimationFrame(() => {
-      // Method 1: Try to restore the card to its previous viewport position
-      const newCardRect = this.getBoundingClientRect?.() || { top: 0 };
-      const scrollDiff = newCardRect.top - cardOffsetFromTop;
-      
-      if (Math.abs(scrollDiff) > 5) {
-        // Card moved, adjust scroll
-        window.scrollBy(0, scrollDiff);
-      } else if (savedScrollTop > 0) {
-        // Fallback: restore absolute scroll position
-        window.scrollTo(savedScrollLeft, savedScrollTop);
-      }
+      requestAnimationFrame(() => {
+        // Restore absolute scroll position
+        if (savedScrollTop > 0 || savedScrollLeft > 0) {
+          window.scrollTo({
+            top: savedScrollTop,
+            left: savedScrollLeft,
+            behavior: 'instant'
+          });
+        }
+      });
     });
   }
 
   _attachEventListeners() {
     const sensors = this._findScheduleSensors();
     
+    // Global touch handler to prevent Safari scroll jump on any interactive element
+    // This catches touch events on buttons, cells, etc. before they can cause scroll
+    this.shadowRoot.querySelectorAll('button, [data-action], .grid-cell, .select-all-btn, .program-header, .day-header').forEach(el => {
+      el.addEventListener('touchstart', (e) => {
+        // Only prevent default for actual interactive elements, not inputs
+        if (!e.target.closest('input, select, textarea')) {
+          e.stopPropagation();
+        }
+      }, { passive: true });
+      
+      el.addEventListener('touchend', (e) => {
+        if (!e.target.closest('input, select, textarea')) {
+          e.stopPropagation();
+        }
+      }, { passive: true });
+    });
+    
     // Power toggle - applies work/pause settings when turning ON
     this.shadowRoot.querySelectorAll('[data-action="toggle-power"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const deviceName = btn.dataset.device;
         const powerEntity = `switch.${deviceName}_power`;
         const isOn = this._hass.states[powerEntity]?.state === 'on';
@@ -1523,7 +1508,9 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     // Fan toggle - just toggles fan
     this.shadowRoot.querySelectorAll('[data-action="toggle-fan"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const deviceName = btn.dataset.device;
         const entity = `switch.${deviceName}_fan`;
         const isOn = this._hass.states[entity]?.state === 'on';
@@ -1532,7 +1519,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="run-timed"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const deviceName = btn.dataset.device;
         const sensor = sensors.find(s => s.deviceName === deviceName);
         if (!sensor?.deviceId) {
@@ -1545,7 +1534,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="cancel-timer"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const deviceName = btn.dataset.device;
         const sensor = sensors.find(s => s.deviceName === deviceName);
         await this._cancelTimer(deviceName, sensor?.deviceId);
@@ -1638,7 +1629,9 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     // Pull
     this.shadowRoot.querySelectorAll('[data-action="pull"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const sensor = sensors.find(s => s.deviceName === btn.dataset.device);
         if (sensor) await this._pullSchedule(sensor);
       });
@@ -1704,7 +1697,9 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     // Stage / Clear / Push buttons
     this.shadowRoot.querySelectorAll('[data-action="stage"]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (this._isSaving) return;
         const sensor = sensors.find(s => s.deviceName === btn.dataset.device);
         if (sensor) this._stageEdits(sensor);
@@ -1712,7 +1707,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="clear-schedule"]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (this._isSaving) return;
         const sensor = sensors.find(s => s.deviceName === btn.dataset.device);
         if (sensor) this._clearSelectedSchedules(sensor);
@@ -1720,7 +1717,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="push"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         if (this._isSaving) return;
         const sensor = sensors.find(s => s.deviceName === btn.dataset.device);
         if (sensor) await this._pushStagedChanges(sensor);
@@ -1728,7 +1727,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="discard-staged"]').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         this._discardStagedChanges(btn.dataset.device);
       });
     });
@@ -1784,7 +1785,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="oil-toggle"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const deviceName = btn.dataset.device;
         const toggleButton = `button.${deviceName}_oil_calibration_toggle`;
         
@@ -1798,7 +1801,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="oil-finalize"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const deviceName = btn.dataset.device;
         const finalizeButton = `button.${deviceName}_oil_calibration_finalize`;
         
@@ -1813,7 +1818,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="oil-refill"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const deviceName = btn.dataset.device;
         const refillButton = `button.${deviceName}_oil_refill_keep_calibration`;
         
@@ -1827,7 +1834,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelectorAll('[data-action="oil-manual-apply"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const deviceName = btn.dataset.device;
         const manualButton = `button.${deviceName}_oil_manual_override`;
         
@@ -1884,6 +1893,17 @@ class AromaLinkScheduleCard extends HTMLElement {
         background: var(--color-bg);
         border-radius: var(--radius);
         overflow: hidden;
+        /* Prevent Safari touch behaviors that cause scroll issues */
+        -webkit-overflow-scrolling: auto;
+      }
+      
+      /* Prevent touch callout and tap highlight on interactive elements */
+      button, [data-action], .grid-cell, .select-all-btn, .program-header, .day-header {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        touch-action: manipulation;
+        user-select: none;
+        -webkit-user-select: none;
       }
       
       .diffuser-card {
@@ -2599,14 +2619,26 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .push-btn {
-        background: linear-gradient(135deg, #4caf50, #8bc34a);
-        color: white;
-        margin-left: auto;
+        background: rgba(158, 158, 158, 0.2);
+        color: var(--color-text-secondary);
       }
       
-      .push-btn:hover:not(.disabled) {
-        transform: scale(1.02);
-        box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+      .push-btn.ready {
+        background: linear-gradient(135deg, #00c853, #69f0ae);
+        color: white;
+        font-weight: 700;
+        box-shadow: 0 2px 8px rgba(0, 200, 83, 0.4);
+        animation: pulse-green 2s infinite;
+      }
+      
+      @keyframes pulse-green {
+        0%, 100% { box-shadow: 0 2px 8px rgba(0, 200, 83, 0.4); }
+        50% { box-shadow: 0 4px 16px rgba(0, 200, 83, 0.6); }
+      }
+      
+      .push-btn.ready:hover:not(.disabled) {
+        transform: scale(1.03);
+        box-shadow: 0 4px 16px rgba(0, 200, 83, 0.5);
       }
       
       .stage-btn.disabled, .clear-btn.disabled, .push-btn.disabled {
@@ -2614,6 +2646,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         cursor: not-allowed;
         transform: none !important;
         box-shadow: none !important;
+        animation: none !important;
       }
       
       /* OIL TRACKING SECTION - Responsive */

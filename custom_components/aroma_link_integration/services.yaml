@@ -101,6 +101,30 @@ refresh_all_schedules:
       description: "The ID of the device. Required if multiple devices are available."
       example: "419933"
 
+save_schedule_batch:
+  description: "Save schedules directly to device - FAST batch operation. Bypasses entities and batches days with identical schedules into single API calls."
+  fields:
+    device_id:
+      description: "The ID of the device. Required if multiple devices are available."
+      example: "419933"
+    schedules:
+      description: "List of day schedules to save. Each item has 'day' (0-6) and 'programs' (list of 5 program objects with startTime, endTime, enabled, level, workSec, pauseSec)."
+      example:
+        - day: 0
+          programs:
+            - startTime: "09:00"
+              endTime: "17:00"
+              enabled: 1
+              level: "A"
+              workSec: 5
+              pauseSec: 900
+            - startTime: "00:00"
+              endTime: "23:59"
+              enabled: 0
+              level: "A"
+              workSec: 10
+              pauseSec: 120
+
 start_timed_run:
   description: "Start a timed run - turn on the diffuser and automatically turn it off after the specified duration. Timer runs server-side and survives browser close."
   fields:
