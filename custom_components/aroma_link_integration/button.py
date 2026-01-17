@@ -2,7 +2,7 @@
 import logging
 from homeassistant.components.button import ButtonEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .const import DOMAIN
 
@@ -284,7 +284,7 @@ class AromaLinkOilCalibrationToggleButton(CoordinatorEntity, ButtonEntity):
         self._name = f"{device_name} Calibration Measurement"
         self._unique_id = f"{entry.data['username']}_{device_id}_oil_calibration_toggle"
         self._attr_icon = "mdi:flask-outline"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -329,7 +329,7 @@ class AromaLinkOilCalibrationFinalizeButton(CoordinatorEntity, ButtonEntity):
         self._name = f"{device_name} Calibration Finalize"
         self._unique_id = f"{entry.data['username']}_{device_id}_oil_calibration_finalize"
         self._attr_icon = "mdi:check-circle-outline"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -379,7 +379,7 @@ class AromaLinkOilRefillKeepCalibrationButton(CoordinatorEntity, ButtonEntity):
         self._name = f"{device_name} Refill (Keep Calibration)"
         self._unique_id = f"{entry.data['username']}_{device_id}_oil_refill_keep_calibration"
         self._attr_icon = "mdi:water-plus-outline"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -416,7 +416,7 @@ class AromaLinkOilManualOverrideButton(CoordinatorEntity, ButtonEntity):
         self._name = f"{device_name} Apply Manual Calibration"
         self._unique_id = f"{entry.data['username']}_{device_id}_oil_manual_override"
         self._attr_icon = "mdi:tune-variant"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):

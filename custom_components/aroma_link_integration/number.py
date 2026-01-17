@@ -2,7 +2,7 @@
 import logging
 from homeassistant.components.number import NumberEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .const import (
     DOMAIN,
@@ -325,7 +325,7 @@ class AromaLinkOilBottleCapacity(CoordinatorEntity, NumberEntity):
         self._attr_native_unit_of_measurement = "ml"
         self._attr_icon = "mdi:bottle-tonic"
         self._attr_mode = "box"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -370,7 +370,7 @@ class AromaLinkOilFillVolume(CoordinatorEntity, NumberEntity):
         self._attr_native_unit_of_measurement = "ml"
         self._attr_icon = "mdi:water-plus"
         self._attr_mode = "box"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -415,7 +415,7 @@ class AromaLinkOilRemainingInput(CoordinatorEntity, NumberEntity):
         self._attr_native_unit_of_measurement = "ml"
         self._attr_icon = "mdi:water-minus"
         self._attr_mode = "box"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -460,7 +460,7 @@ class AromaLinkOilManualStartVolume(CoordinatorEntity, NumberEntity):
         self._attr_native_unit_of_measurement = "ml"
         self._attr_icon = "mdi:water-plus"
         self._attr_mode = "box"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -505,7 +505,7 @@ class AromaLinkOilManualEndVolume(CoordinatorEntity, NumberEntity):
         self._attr_native_unit_of_measurement = "ml"
         self._attr_icon = "mdi:water-minus"
         self._attr_mode = "box"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -550,7 +550,7 @@ class AromaLinkOilManualRuntimeHours(CoordinatorEntity, NumberEntity):
         self._attr_native_unit_of_measurement = "h"
         self._attr_icon = "mdi:timer"
         self._attr_mode = "box"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):
@@ -595,7 +595,7 @@ class AromaLinkOilManualRate(CoordinatorEntity, NumberEntity):
         self._attr_native_unit_of_measurement = "ml/hr"
         self._attr_icon = "mdi:speedometer"
         self._attr_mode = "box"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):

@@ -1,7 +1,7 @@
 """Select platform for Aroma-Link."""
 from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .const import DOMAIN
 
@@ -219,7 +219,7 @@ class AromaLinkOilCalibrationState(CoordinatorEntity, SelectEntity):
         self._name = f"{device_name} Oil Calibration State"
         self._unique_id = f"{entry.data['username']}_{device_id}_oil_calibration_state"
         self._attr_icon = "mdi:flask-outline"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):

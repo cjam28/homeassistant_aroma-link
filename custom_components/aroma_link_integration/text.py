@@ -3,7 +3,7 @@ import re
 
 from homeassistant.components.text import TextEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 
 from .const import DOMAIN
 
@@ -161,7 +161,7 @@ class AromaLinkOilFillDate(CoordinatorEntity, TextEntity):
         self._attr_native_max = 10  # "YYYY-MM-DD"
         self._attr_pattern = r"^\\d{4}-\\d{2}-\\d{2}$"
         self._attr_icon = "mdi:calendar"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def name(self):

@@ -1,5 +1,5 @@
 /**
- * Aroma-Link Schedule Card v2.3.0
+ * Aroma-Link Schedule Card v2.4.0
  * 
  * A complete dashboard card for Aroma-Link diffusers including:
  * - Compact manual controls (Power, Fan, Work/Pause, Run options in one row)
@@ -598,9 +598,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       // For each day that has changes, build full 5-program schedule and push
       const daySwitches = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
       let savedDays = 0;
+      const totalDays = Object.keys(changesByDay).length;
+      console.log(`[AromaLink] Starting push: ${totalDays} day(s) to update`);
 
       for (const [dayStr, programs] of Object.entries(changesByDay)) {
         const day = parseInt(dayStr);
+        console.log(`[AromaLink] Processing day ${day} (${daySwitches[day]})...`);
         
         // Pick first program to set as current for the API
         const firstProg = Object.keys(programs)[0];
@@ -611,7 +614,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           day: day,
           program: parseInt(firstProg)
         });
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, 20));
 
         // For each program in this day, update entities
         for (const [progStr, data] of Object.entries(programs)) {
@@ -623,7 +626,7 @@ class AromaLinkScheduleCard extends HTMLElement {
             day: day,
             program: prog
           });
-          await new Promise(r => setTimeout(r, 30));
+          await new Promise(r => setTimeout(r, 10));
 
           const prefix = sensor.deviceName;
           
@@ -678,7 +681,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           }
           
           await Promise.all(promises);
-          await new Promise(r => setTimeout(r, 30));
+          await new Promise(r => setTimeout(r, 10));
         }
         
         // Turn off all day switches, then on just this day
@@ -694,7 +697,7 @@ class AromaLinkScheduleCard extends HTMLElement {
           await this._hass.callService('switch', 'turn_on', { entity_id: daySwitch });
         }
         
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, 20));
         
         // Save this day
         const saveButton = `button.${sensor.deviceName}_save_program`;
@@ -702,8 +705,11 @@ class AromaLinkScheduleCard extends HTMLElement {
           await this._hass.callService('button', 'press', { entity_id: saveButton });
         }
         
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 150));
         savedDays++;
+        console.log(`[AromaLink] Day ${day} saved (${savedDays}/${totalDays})`);
+        this._showStatus(`Saving... ${savedDays}/${totalDays} days`, false, sensor.deviceName);
+        this.render();
       }
       
       // Clear staged changes
@@ -720,8 +726,13 @@ class AromaLinkScheduleCard extends HTMLElement {
       
     } catch (error) {
       console.error('Error pushing changes:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
       this._isSaving = false;
-      this._showStatus('Error pushing changes. Check console.', true, sensor.deviceName);
+      this._showStatus(`Error: ${error.message || 'Unknown error'}. Check console.`, true, sensor.deviceName);
     }
     
     this.render();
@@ -821,6 +832,21 @@ class AromaLinkScheduleCard extends HTMLElement {
     this._hass = hass;
     if (!this._initialized) {
       this._initialized = true;
+      this.render();
+      return;
+    }
+    // Don't re-render if an input or time field is focused - this prevents the field from losing focus
+    const activeEl = this.shadowRoot?.activeElement;
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT' || activeEl.tagName === 'TEXTAREA')) {
+      return;
+    }
+    // Also check if a nested shadowRoot has focus
+    const docActive = document.activeElement;
+    if (docActive === this && this.shadowRoot) {
+      const shadowActive = this.shadowRoot.activeElement;
+      if (shadowActive && (shadowActive.tagName === 'INPUT' || shadowActive.tagName === 'SELECT' || shadowActive.tagName === 'TEXTAREA')) {
+        return;
+      }
     }
     this.render();
   }
@@ -1879,10 +1905,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       .compact-input {
         width: 64px;
         padding: 6px 8px;
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
         font-size: 0.95em;
         text-align: center;
+        background: var(--card-background-color, white);
+        color: var(--primary-text-color);
       }
 
       .unit {
@@ -1964,10 +1992,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       .hours-input {
         width: 52px;
         padding: 6px;
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
         font-size: 0.85em;
         text-align: center;
+        background: var(--card-background-color, white);
+        color: var(--primary-text-color);
       }
       
       .hours-label {
@@ -2019,18 +2049,20 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .copy-select {
         padding: 4px 8px;
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
         font-size: 0.75em;
-        background: white;
+        background: var(--card-background-color, white);
+        color: var(--primary-text-color);
         cursor: pointer;
       }
       
       .chip-btn {
         padding: 4px 10px;
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 12px;
-        background: white;
+        background: var(--card-background-color, white);
+        color: var(--primary-text-color);
         font-size: 0.7em;
         font-weight: 500;
         cursor: pointer;
@@ -2311,10 +2343,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .time-input {
         padding: 4px 6px;
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
         font-size: 0.8em;
         width: 85px;
+        background: var(--card-background-color, white);
+        color: var(--primary-text-color);
       }
       
       .num-inputs {
@@ -2333,18 +2367,21 @@ class AromaLinkScheduleCard extends HTMLElement {
       .num-input {
         width: 50px;
         padding: 4px;
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
         font-size: 0.8em;
         text-align: center;
+        background: var(--card-background-color, white);
+        color: var(--primary-text-color);
       }
       
       .level-select {
         padding: 4px 8px;
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 4px;
         font-size: 0.8em;
-        background: white;
+        background: var(--card-background-color, white);
+        color: var(--primary-text-color);
       }
 
       .level-label {
@@ -2451,19 +2488,20 @@ class AromaLinkScheduleCard extends HTMLElement {
         display: flex;
         gap: 16px;
         align-items: flex-start;
-        justify-content: space-between;
       }
 
       .oil-left {
         display: flex;
-        gap: 14px;
-        align-items: flex-start;
-        flex: 1;
+        flex-direction: column;
+        gap: 12px;
+        align-items: center;
+        flex: 0 0 25%;
+        max-width: 160px;
       }
 
       .oil-right {
-        min-width: 260px;
-        max-width: 340px;
+        flex: 1;
+        min-width: 0;
       }
       
       .bottle-container {
@@ -2476,11 +2514,11 @@ class AromaLinkScheduleCard extends HTMLElement {
       .bottle {
         width: 50px;
         height: 80px;
-        border: 2px solid #666;
+        border: 2px solid var(--secondary-text-color, #666);
         border-radius: 0 0 10px 10px;
         position: relative;
         overflow: hidden;
-        background: linear-gradient(180deg, rgba(255,255,255,0.8), rgba(0,0,0,0.04));
+        background: var(--card-background-color, white);
         box-shadow: inset 0 0 8px rgba(0,0,0,0.1);
       }
       
@@ -2492,10 +2530,10 @@ class AromaLinkScheduleCard extends HTMLElement {
         transform: translateX(-50%);
         width: 24px;
         height: 10px;
-        border: 2px solid #666;
+        border: 2px solid var(--secondary-text-color, #666);
         border-bottom: none;
         border-radius: 4px 4px 0 0;
-        background: linear-gradient(180deg, rgba(255,255,255,0.8), rgba(0,0,0,0.05));
+        background: var(--card-background-color, white);
       }
 
       .bottle::after {
@@ -2527,8 +2565,8 @@ class AromaLinkScheduleCard extends HTMLElement {
         transform: translate(-50%, -50%);
         font-size: 0.75em;
         font-weight: 700;
-        color: #333;
-        text-shadow: 0 0 3px white;
+        color: var(--primary-text-color, #333);
+        text-shadow: 0 0 3px var(--card-background-color, white);
       }
       
       .bottle-info {
@@ -2540,19 +2578,20 @@ class AromaLinkScheduleCard extends HTMLElement {
       
       .bottle-info .remaining {
         font-weight: 600;
-        color: #333;
+        color: var(--primary-text-color, #333);
       }
       
       .bottle-info .days-left {
-        color: #666;
+        color: var(--secondary-text-color, #666);
         font-size: 0.9em;
       }
       
       .oil-summary {
         display: flex;
         flex-direction: column;
-        gap: 6px;
-        min-width: 200px;
+        gap: 4px;
+        width: 100%;
+        font-size: 0.75em;
       }
 
       .summary-row {
@@ -2563,12 +2602,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
 
       .summary-label {
-        color: #666;
+        color: var(--secondary-text-color, #666);
       }
 
       .summary-value {
         font-weight: 600;
-        color: #333;
+        color: var(--primary-text-color, #333);
       }
 
       .stat-row {
@@ -2579,7 +2618,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .stat-label {
-        color: #666;
+        color: var(--secondary-text-color, #666);
       }
       
       .stat-value {
@@ -2591,34 +2630,50 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .stat-value.inactive {
-        color: #999;
+        color: var(--disabled-text-color, #999);
       }
       
       /* Calibration Panel */
       .calibration-panel {
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.1));
         border-radius: 8px;
         overflow: hidden;
         width: 100%;
+        background: var(--secondary-background-color, rgba(0,0,0,0.02));
       }
       
       .calibration-panel summary {
-        padding: 8px 12px;
-        background: rgba(0,0,0,0.03);
+        padding: 10px 14px;
+        background: var(--secondary-background-color, rgba(0,0,0,0.03));
         cursor: pointer;
-        font-size: 0.8em;
-        font-weight: 500;
+        font-size: 0.85em;
+        font-weight: 600;
+        color: var(--primary-text-color);
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      
+      .calibration-panel summary::before {
+        content: '▶';
+        font-size: 0.7em;
+        transition: transform 200ms;
+      }
+      
+      .calibration-panel[open] summary::before {
+        transform: rotate(90deg);
       }
       
       .calibration-panel summary:hover {
-        background: rgba(0,0,0,0.05);
+        background: var(--secondary-background-color, rgba(0,0,0,0.05));
       }
       
       .calibration-content {
-        padding: 12px;
+        padding: 14px;
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px 12px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px 16px;
       }
       
       .calibration-row {
@@ -2630,7 +2685,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .calibration-row label {
-        color: #555;
+        color: var(--secondary-text-color, #555);
       }
       
       .input-group {
@@ -2642,10 +2697,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       .oil-input {
         width: 70px;
         padding: 4px 6px;
-        border: 1px solid rgba(0,0,0,0.15);
+        border: 1px solid var(--divider-color, rgba(0,0,0,0.15));
         border-radius: 4px;
         font-size: 0.9em;
         text-align: right;
+        background: var(--card-background-color, white);
+        color: var(--primary-text-color);
       }
 
       .oil-input.date {
@@ -2654,7 +2711,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       }
       
       .input-group span {
-        color: #666;
+        color: var(--secondary-text-color, #666);
         font-size: 0.9em;
       }
       
@@ -2684,8 +2741,8 @@ class AromaLinkScheduleCard extends HTMLElement {
       .oil-btn.small-btn {
         padding: 6px 10px;
         font-size: 0.75em;
-        background: rgba(0,0,0,0.05);
-        color: #555;
+        background: var(--secondary-background-color, rgba(0,0,0,0.05));
+        color: var(--primary-text-color, #555);
       }
 
       .oil-btn.small-btn:hover {
@@ -2735,7 +2792,7 @@ class AromaLinkScheduleCard extends HTMLElement {
       .manual-title {
         font-size: 0.75em;
         font-weight: 600;
-        color: #444;
+        color: var(--primary-text-color, #444);
         margin-bottom: 6px;
       }
     `;
