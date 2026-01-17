@@ -920,7 +920,9 @@ class AromaLinkScheduleCard extends HTMLElement {
     const measuredRemaining = parseFloat(
       this._readOilInputValue(sensor.deviceName, 'measuredRemaining', measuredState?.state)
     ) || 0;
-    const fillDate = this._readOilInputValue(sensor.deviceName, 'fillDate', fillDateState?.state || '') || '';
+    // Handle "unknown" or "unavailable" states for date input (must be empty string or valid date)
+    const rawFillDate = this._readOilInputValue(sensor.deviceName, 'fillDate', fillDateState?.state || '');
+    const fillDate = (rawFillDate && rawFillDate !== 'unknown' && rawFillDate !== 'unavailable' && /^\d{4}-\d{2}-\d{2}$/.test(rawFillDate)) ? rawFillDate : '';
     const manualStart = parseFloat(
       this._readOilInputValue(sensor.deviceName, 'manualStart', manualStartState?.state)
     ) || 0;
@@ -1201,6 +1203,23 @@ class AromaLinkScheduleCard extends HTMLElement {
   render() {
     if (!this._hass) return;
     
+    // Save scroll position before re-render (fixes Safari/iOS scroll jump)
+    // Try multiple scroll containers that HA might use
+    const possibleContainers = [
+      this.closest('hui-view'),
+      this.closest('.content'),
+      this.closest('main'),
+      document.querySelector('home-assistant')?.shadowRoot?.querySelector('home-assistant-main')?.shadowRoot?.querySelector('ha-panel-lovelace')?.shadowRoot?.querySelector('hui-root')?.shadowRoot?.querySelector('.container'),
+    ].filter(Boolean);
+    
+    const scrollContainer = possibleContainers.find(c => c?.scrollTop > 0) || document.scrollingElement || document.documentElement;
+    const savedScrollTop = window.scrollY || scrollContainer?.scrollTop || 0;
+    const savedScrollLeft = window.scrollX || scrollContainer?.scrollLeft || 0;
+    
+    // Also save this card's position relative to viewport
+    const cardRect = this.getBoundingClientRect?.() || { top: 0 };
+    const cardOffsetFromTop = cardRect.top;
+    
     const sensors = this._findScheduleSensors();
     
     if (sensors.length === 0) {
@@ -1280,7 +1299,7 @@ class AromaLinkScheduleCard extends HTMLElement {
             
             <div class="control-group run-options">
               <div class="run-panel">
-                <div class="run-header">Apply Settings</div>
+                <div class="run-header">Run Timed</div>
                 ${timerState ? `
                   <div class="run-buttons">
                     <span class="countdown">⏱️ ${this._formatCountdown(timerState.remainingSeconds)}</span>
@@ -1288,12 +1307,9 @@ class AromaLinkScheduleCard extends HTMLElement {
                   </div>
                 ` : `
                   <div class="run-buttons">
-                    <button class="run-btn continuous" data-action="run-continuous" data-device="${sensor.deviceName}">Run Continuously</button>
-                    <div class="timed-box">
-                      <button class="run-btn timed" data-action="run-timed" data-device="${sensor.deviceName}">Run Timed</button>
-                      <input type="number" class="hours-input" data-field="timedHours" data-device="${sensor.deviceName}" value="${timedHours}" min="0.5" max="24" step="0.5" title="Hours">
-                      <span class="hours-label">hr</span>
-                    </div>
+                    <button class="run-btn timed" data-action="run-timed" data-device="${sensor.deviceName}">Start</button>
+                    <input type="number" class="hours-input" data-field="timedHours" data-device="${sensor.deviceName}" value="${timedHours}" min="0.5" max="24" step="0.5" title="Hours">
+                    <span class="hours-label">hr</span>
                   </div>
                 `}
               </div>
@@ -1462,41 +1478,56 @@ class AromaLinkScheduleCard extends HTMLElement {
     `;
 
     this._attachEventListeners();
+    
+    // Restore scroll position after re-render (fixes Safari/iOS scroll jump)
+    requestAnimationFrame(() => {
+      // Method 1: Try to restore the card to its previous viewport position
+      const newCardRect = this.getBoundingClientRect?.() || { top: 0 };
+      const scrollDiff = newCardRect.top - cardOffsetFromTop;
+      
+      if (Math.abs(scrollDiff) > 5) {
+        // Card moved, adjust scroll
+        window.scrollBy(0, scrollDiff);
+      } else if (savedScrollTop > 0) {
+        // Fallback: restore absolute scroll position
+        window.scrollTo(savedScrollLeft, savedScrollTop);
+      }
+    });
   }
 
   _attachEventListeners() {
     const sensors = this._findScheduleSensors();
     
-    // Power/Fan toggles
+    // Power toggle - applies work/pause settings when turning ON
     this.shadowRoot.querySelectorAll('[data-action="toggle-power"]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const deviceName = btn.dataset.device;
-        const entity = `switch.${deviceName}_power`;
-        const isOn = this._hass.states[entity]?.state === 'on';
-        await this._hass.callService('switch', isOn ? 'turn_off' : 'turn_on', { entity_id: entity });
+        const powerEntity = `switch.${deviceName}_power`;
+        const isOn = this._hass.states[powerEntity]?.state === 'on';
+        
+        if (isOn) {
+          // Turning OFF - just turn off
+          await this._hass.callService('switch', 'turn_off', { entity_id: powerEntity });
+        } else {
+          // Turning ON - apply work/pause settings first, then turn on
+          const controls = {
+            power: powerEntity,
+            workNumber: `number.${deviceName}_work_time`,
+            pauseNumber: `number.${deviceName}_pause_time`
+          };
+          await this._applySettingsAndRun(deviceName, controls);
+          this._showStatus('Running with current settings', false, deviceName);
+        }
       });
     });
 
+    // Fan toggle - just toggles fan
     this.shadowRoot.querySelectorAll('[data-action="toggle-fan"]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const deviceName = btn.dataset.device;
         const entity = `switch.${deviceName}_fan`;
         const isOn = this._hass.states[entity]?.state === 'on';
         await this._hass.callService('switch', isOn ? 'turn_off' : 'turn_on', { entity_id: entity });
-      });
-    });
-
-    // Run buttons
-    this.shadowRoot.querySelectorAll('[data-action="run-continuous"]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const deviceName = btn.dataset.device;
-        const controls = {
-          power: `switch.${deviceName}_power`,
-          workNumber: `number.${deviceName}_work_time`,
-          pauseNumber: `number.${deviceName}_pause_time`
-        };
-        await this._applySettingsAndRun(deviceName, controls);
-        this._showStatus('Running continuously', false, deviceName);
       });
     });
 
@@ -2013,24 +2044,12 @@ class AromaLinkScheduleCard extends HTMLElement {
       .run-buttons {
         display: flex;
         align-items: center;
-        gap: clamp(4px, 1vw, 8px);
-        width: 100%;
         justify-content: center;
-        flex-wrap: wrap;
-      }
-
-      .timed-box {
-        display: flex;
-        align-items: center;
-        gap: clamp(4px, 1vw, 6px);
-        padding: 4px 6px;
-        border: 1px solid rgba(0,0,0,0.15);
-        border-radius: 10px;
-        background: rgba(0,0,0,0.02);
+        gap: clamp(6px, 1.5vw, 10px);
       }
       
       .run-btn {
-        padding: clamp(6px, 1.5vw, 8px) clamp(10px, 2vw, 14px);
+        padding: clamp(6px, 1.5vw, 8px) clamp(12px, 3vw, 18px);
         border: none;
         border-radius: 6px;
         font-weight: 600;
@@ -2038,14 +2057,6 @@ class AromaLinkScheduleCard extends HTMLElement {
         cursor: pointer;
         transition: all 150ms;
         white-space: nowrap;
-      }
-      
-      .run-btn.continuous {
-        background: linear-gradient(135deg, #4caf50, #8bc34a);
-        color: white;
-      }
-      
-      .run-btn.timed {
         background: linear-gradient(135deg, #00acc1, #26c6da);
         color: white;
       }
