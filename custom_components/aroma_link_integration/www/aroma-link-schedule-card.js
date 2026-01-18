@@ -1,5 +1,5 @@
 /**
- * Aroma-Link Schedule Card v2.6.1
+ * Aroma-Link Schedule Card v2.6.2
  * 
  * A complete dashboard card for Aroma-Link diffusers including:
  * - Compact manual controls (Power applies work/pause, Fan, Timed Run)
@@ -12,6 +12,8 @@
  * - Optimized rendering (debounced, surgical updates for countdown)
  * - Safari/iOS scroll fix with proper touch handling
  * - FIX: Auto-refresh matrix after batch sync (v2.6.1)
+ * - FIX: Safari touch handler passive:false for preventDefault (v2.6.2)
+ * - FIX: Suppress renders during operations to prevent scroll jump (v2.6.2)
  * 
  * Styled to match Mushroom/button-card aesthetics.
  * Auto-discovers all Aroma-Link devices - no configuration needed!
@@ -36,6 +38,10 @@ class AromaLinkScheduleCard extends HTMLElement {
     // STAGED CHANGES: Map<deviceName, Map<"day-program", scheduleData>>
     // This holds changes that have been "staged" locally but not yet pushed to API
     this._stagedChangesByDevice = new Map();
+    
+    // Flag to suppress renders during operations (push/pull)
+    this._isOperationInProgress = false;
+    this._renderPending = false;
 
     // Oil panel open state per device
     this._oilPanelOpenByDevice = new Map();
@@ -703,12 +709,22 @@ class AromaLinkScheduleCard extends HTMLElement {
       this._showStatus(`✓ Saved! Refreshing schedule...`, false, sensor.deviceName);
       console.log(`[AromaLink] Batch save complete, refreshing matrix...`);
       
+      // Suppress renders during pull to avoid scroll jump
+      this._isOperationInProgress = true;
+      
       // Pull fresh schedule data from API to update the matrix display
       await this._pullSchedule(sensor);
       
+      // Small delay to let HA propagate state updates
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      this._isOperationInProgress = false;
       this._isSaving = false;
       this._showStatus(`✓ Saved ${totalDays} day(s) to Aroma-Link`, false, sensor.deviceName);
       console.log(`[AromaLink] Matrix refreshed`);
+      
+      // Single render after everything is done
+      this.render();
       
     } catch (error) {
       console.error('Error pushing changes:', error);
@@ -717,11 +733,11 @@ class AromaLinkScheduleCard extends HTMLElement {
         code: error.code,
         stack: error.stack
       });
+      this._isOperationInProgress = false;
       this._isSaving = false;
       this._showStatus(`Error: ${error.message || 'Unknown error'}. Check console.`, true, sensor.deviceName);
+      this.render();
     }
-    
-    this.render();
   }
 
   // Discard all staged changes
@@ -1189,6 +1205,12 @@ class AromaLinkScheduleCard extends HTMLElement {
   render() {
     if (!this._hass) return;
     
+    // Skip renders during operations (like push/pull) to prevent scroll jumps
+    if (this._isOperationInProgress) {
+      console.log('[AromaLink] Skipping render - operation in progress');
+      return;
+    }
+    
     // Debounce rapid renders
     if (this._renderPending) return;
     this._renderPending = true;
@@ -1490,20 +1512,22 @@ class AromaLinkScheduleCard extends HTMLElement {
     const sensors = this._findScheduleSensors();
     
     // Global touch handler to prevent Safari scroll jump on any interactive element
-    // This catches touch events on buttons, cells, etc. before they can cause scroll
+    // MUST NOT be passive to allow preventDefault() to work
     this.shadowRoot.querySelectorAll('button, [data-action], .grid-cell, .select-all-btn, .program-header, .day-header').forEach(el => {
       el.addEventListener('touchstart', (e) => {
         // Only prevent default for actual interactive elements, not inputs
         if (!e.target.closest('input, select, textarea')) {
+          e.preventDefault();
           e.stopPropagation();
         }
-      }, { passive: true });
+      }, { passive: false }); // Must be false to allow preventDefault
       
       el.addEventListener('touchend', (e) => {
         if (!e.target.closest('input, select, textarea')) {
+          e.preventDefault();
           e.stopPropagation();
         }
-      }, { passive: true });
+      }, { passive: false }); // Must be false to allow preventDefault
     });
     
     // Power toggle - applies work/pause settings when turning ON
