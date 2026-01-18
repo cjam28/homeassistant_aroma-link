@@ -1,5 +1,5 @@
 /**
- * Aroma-Link Schedule Card v2.6.2
+ * Aroma-Link Schedule Card v2.6.5
  * 
  * A complete dashboard card for Aroma-Link diffusers including:
  * - Compact manual controls (Power applies work/pause, Fan, Timed Run)
@@ -14,6 +14,17 @@
  * - FIX: Auto-refresh matrix after batch sync (v2.6.1)
  * - FIX: Safari touch handler passive:false for preventDefault (v2.6.2)
  * - FIX: Suppress renders during operations to prevent scroll jump (v2.6.2)
+ * - FIX: Comprehensive Safari/iOS scroll fix with async renders (v2.6.3)
+ *   - All user interactions use setTimeout for async render
+ *   - Triple-RAF scroll restoration
+ *   - CSS overscroll-behavior: contain
+ *   - Surgical status updates without full render
+ * - FIX: Block HA's action-handler from causing scroll events (v2.6.4)
+ *   - capture:true + stopImmediatePropagation on touch events
+ *   - Card-level scroll/wheel event blocking
+ * - FIX: Document-level scroll lock during interactions (v2.6.5)
+ *   - interactionFlag.active triggers scroll position restoration
+ *   - Catches scroll events that bypass element handlers
  * 
  * Styled to match Mushroom/button-card aesthetics.
  * Auto-discovers all Aroma-Link devices - no configuration needed!
@@ -343,7 +354,8 @@ class AromaLinkScheduleCard extends HTMLElement {
       cells.add(key);
       this._loadSelectedIntoEditor(sensor);
     }
-    this.render();
+    // Use setTimeout to allow browser to finish processing touch/click before render
+    setTimeout(() => this.render(), 0);
   }
 
   _selectProgramRow(deviceName, program) {
@@ -359,7 +371,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         cells.add(`${day}-${program}`);
       }
     }
-    this.render();
+    setTimeout(() => this.render(), 0);
   }
 
   _selectDayColumn(deviceName, day) {
@@ -375,7 +387,7 @@ class AromaLinkScheduleCard extends HTMLElement {
         cells.add(`${day}-${prog}`);
       }
     }
-    this.render();
+    setTimeout(() => this.render(), 0);
   }
 
   _hasMultipleProgramsSameDay(deviceName) {
@@ -397,12 +409,12 @@ class AromaLinkScheduleCard extends HTMLElement {
         cells.add(`${day}-${prog}`);
       }
     }
-    this.render();
+    setTimeout(() => this.render(), 0);
   }
 
   _clearSelection(deviceName) {
     this._getSelectedCells(deviceName).clear();
-    this.render();
+    setTimeout(() => this.render(), 0);
   }
 
   _getEditorValues(deviceName) {
@@ -466,14 +478,28 @@ class AromaLinkScheduleCard extends HTMLElement {
   _showStatus(message, isError = false, deviceName = null) {
     this._statusMessage = { text: message, isError };
     this._statusDevice = deviceName;
-    this.render();
+    
+    // Update status bar surgically without full render if possible
+    const statusEl = this.shadowRoot?.querySelector(`.status-bar[data-device="${deviceName}"]`);
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.className = `status-bar ${isError ? 'error' : 'success'}`;
+      statusEl.style.display = 'block';
+    } else {
+      // Fallback to full render if status element doesn't exist
+      setTimeout(() => this.render(), 0);
+    }
     
     if (!isError) {
       setTimeout(() => {
         if (this._statusMessage?.text === message) {
           this._statusMessage = null;
           this._statusDevice = null;
-          this.render();
+          // Clear status surgically
+          const el = this.shadowRoot?.querySelector(`.status-bar[data-device="${deviceName}"]`);
+          if (el) {
+            el.style.display = 'none';
+          }
         }
       }, 4000);
     }
@@ -558,7 +584,7 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     cells.clear();
     this._showStatus(`✓ Staged ${Object.values(daySelections).flat().length} cell(s). Click "Push" when ready.`, false, sensor.deviceName);
-    this.render();
+    setTimeout(() => this.render(), 0);
   }
 
   // Clear selected cells (stage as disabled)
@@ -591,7 +617,7 @@ class AromaLinkScheduleCard extends HTMLElement {
 
     cells.clear();
     this._showStatus(`✓ Staged ${count} cell(s) for clearing. Click "Push" when ready.`, false, sensor.deviceName);
-    this.render();
+    setTimeout(() => this.render(), 0);
   }
 
   _getCellDataFromMatrix(sensor, day, prog) {
@@ -744,7 +770,7 @@ class AromaLinkScheduleCard extends HTMLElement {
   _discardStagedChanges(deviceName) {
     this._getStagedChanges(deviceName).clear();
     this._showStatus('Discarded all staged changes', false, deviceName);
-    this.render();
+    setTimeout(() => this.render(), 0);
   }
 
   _checkOverlaps(sensor, day, editingProgram, newStart, newEnd) {
@@ -1225,13 +1251,16 @@ class AromaLinkScheduleCard extends HTMLElement {
   _doRender() {
     if (!this._hass) return;
     
-    // Save scroll position before re-render
-    const savedScrollTop = window.scrollY || window.pageYOffset || 0;
-    const savedScrollLeft = window.scrollX || window.pageXOffset || 0;
+    // Save scroll position before re-render - multiple methods for Safari compatibility
+    const savedScrollTop = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+    const savedScrollLeft = window.scrollX || window.pageXOffset || document.documentElement.scrollLeft || 0;
     
     // Also save this card's position relative to viewport
     const cardRect = this.getBoundingClientRect?.() || { top: 0 };
     const cardOffsetFromTop = cardRect.top;
+    
+    // For Safari: store if we were near top of page
+    const wasAtTop = savedScrollTop < 50;
     
     const sensors = this._findScheduleSensors();
     
@@ -1493,17 +1522,32 @@ class AromaLinkScheduleCard extends HTMLElement {
     this._attachEventListeners();
     
     // Restore scroll position after re-render (fixes Safari/iOS scroll jump)
-    // Use double-RAF for Safari which needs extra frame for layout
+    // Use triple-RAF for Safari which needs extra frames for layout
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        // Restore absolute scroll position
-        if (savedScrollTop > 0 || savedScrollLeft > 0) {
-          window.scrollTo({
-            top: savedScrollTop,
-            left: savedScrollLeft,
-            behavior: 'instant'
-          });
-        }
+        requestAnimationFrame(() => {
+          // Only restore if we had a meaningful scroll position and we're not at the same place
+          const currentScroll = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+          const scrollDiff = Math.abs(currentScroll - savedScrollTop);
+          
+          // If scroll jumped by more than 10px, restore it
+          if (scrollDiff > 10 && savedScrollTop > 0) {
+            try {
+              // Try smooth scroll restoration first
+              window.scrollTo({
+                top: savedScrollTop,
+                left: savedScrollLeft,
+                behavior: 'instant'
+              });
+            } catch (e) {
+              // Fallback for older browsers
+              window.scrollTo(savedScrollLeft, savedScrollTop);
+            }
+          } else if (wasAtTop && currentScroll > 100) {
+            // Safari sometimes scrolls down when it should stay at top
+            window.scrollTo(0, 0);
+          }
+        });
       });
     });
   }
@@ -1511,23 +1555,85 @@ class AromaLinkScheduleCard extends HTMLElement {
   _attachEventListeners() {
     const sensors = this._findScheduleSensors();
     
-    // Global touch handler to prevent Safari scroll jump on any interactive element
+    // FLAG: Track if we're in an interaction to suppress scroll side-effects
+    if (!this._interactionFlag) {
+      this._interactionFlag = { active: false };
+    }
+    
+    // CARD-LEVEL: Block HA's action-handler from seeing scroll events from our card
+    const haCard = this.shadowRoot.querySelector('ha-card');
+    if (haCard && !haCard._aromaBlockerAttached) {
+      haCard._aromaBlockerAttached = true;
+      
+      // Block scroll events from bubbling to HA's action-handler
+      haCard.addEventListener('scroll', (e) => {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }, { capture: true, passive: true });
+      
+      // Block wheel events 
+      haCard.addEventListener('wheel', (e) => {
+        e.stopImmediatePropagation();
+      }, { capture: true, passive: true });
+      
+      // DOCUMENT-LEVEL: Temporarily lock scroll position during interactions
+      // This catches scroll events that bypass our element handlers
+      if (!window._aromaScrollLockRegistered) {
+        window._aromaScrollLockRegistered = true;
+        let lastGoodScrollY = window.scrollY;
+        let lockTimeout = null;
+        
+        document.addEventListener('scroll', (e) => {
+          // If we're in an active interaction, restore scroll position
+          if (this._interactionFlag?.active) {
+            window.scrollTo(0, lastGoodScrollY);
+            e.stopPropagation();
+          } else {
+            // Update "good" position when not interacting
+            lastGoodScrollY = window.scrollY;
+          }
+        }, { capture: true, passive: false });
+      }
+    }
+    
+    // Global touch handler to prevent Safari scroll jump AND block HA's action-handler
+    // Use capture:true to intercept BEFORE HA's handlers see the event
     // MUST NOT be passive to allow preventDefault() to work
+    const interactionFlag = this._interactionFlag;
+    
     this.shadowRoot.querySelectorAll('button, [data-action], .grid-cell, .select-all-btn, .program-header, .day-header').forEach(el => {
       el.addEventListener('touchstart', (e) => {
+        // Mark interaction as active - this triggers scroll lock
+        interactionFlag.active = true;
+        
         // Only prevent default for actual interactive elements, not inputs
         if (!e.target.closest('input, select, textarea')) {
           e.preventDefault();
           e.stopPropagation();
+          e.stopImmediatePropagation(); // Stop HA's action-handler from seeing this
         }
-      }, { passive: false }); // Must be false to allow preventDefault
+        
+        // Clear interaction flag after a short delay (allows render to complete)
+        setTimeout(() => { interactionFlag.active = false; }, 300);
+      }, { passive: false, capture: true }); // capture:true to run FIRST
       
       el.addEventListener('touchend', (e) => {
         if (!e.target.closest('input, select, textarea')) {
           e.preventDefault();
           e.stopPropagation();
+          e.stopImmediatePropagation();
         }
-      }, { passive: false }); // Must be false to allow preventDefault
+        // Keep flag active a bit longer after touch ends to catch delayed scrolls
+        setTimeout(() => { interactionFlag.active = false; }, 300);
+      }, { passive: false, capture: true });
+      
+      // Also block touchmove to prevent HA's gesture detection
+      el.addEventListener('touchmove', (e) => {
+        if (!e.target.closest('input, select, textarea')) {
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        }
+      }, { passive: true, capture: true });
     });
     
     // Power toggle - applies work/pause settings when turning ON
@@ -1614,18 +1720,20 @@ class AromaLinkScheduleCard extends HTMLElement {
       });
     });
 
-    // Cell clicks - Safari-compatible event handling
+    // Cell clicks - Safari-compatible event handling with scroll lock
     this.shadowRoot.querySelectorAll('[data-action="toggle-cell"]').forEach(cell => {
       cell.addEventListener('click', (e) => {
+        interactionFlag.active = true; // Enable scroll lock
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        if (this._isSaving) return;
+        if (this._isSaving) { interactionFlag.active = false; return; }
         const day = parseInt(cell.dataset.day);
         const program = parseInt(cell.dataset.program);
         const deviceName = cell.dataset.device;
         const sensor = sensors.find(s => s.deviceName === deviceName);
         if (sensor) this._toggleCell(deviceName, day, program, sensor);
+        setTimeout(() => { interactionFlag.active = false; }, 300);
         return false;
       }, { passive: false, capture: true });
     });
@@ -1633,22 +1741,26 @@ class AromaLinkScheduleCard extends HTMLElement {
     // Row/column selection
     this.shadowRoot.querySelectorAll('[data-action="select-row"]').forEach(row => {
       row.addEventListener('click', (e) => {
+        interactionFlag.active = true;
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        if (this._isSaving) return;
+        if (this._isSaving) { interactionFlag.active = false; return; }
         this._selectProgramRow(row.dataset.device, parseInt(row.dataset.program));
+        setTimeout(() => { interactionFlag.active = false; }, 300);
         return false;
       }, { passive: false, capture: true });
     });
 
     this.shadowRoot.querySelectorAll('[data-action="select-day"]').forEach(header => {
       header.addEventListener('click', (e) => {
+        interactionFlag.active = true;
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        if (this._isSaving) return;
+        if (this._isSaving) { interactionFlag.active = false; return; }
         this._selectDayColumn(header.dataset.device, parseInt(header.dataset.day));
+        setTimeout(() => { interactionFlag.active = false; }, 300);
         return false;
       }, { passive: false, capture: true });
     });
@@ -1656,22 +1768,26 @@ class AromaLinkScheduleCard extends HTMLElement {
     // Select all / clear - Safari-compatible
     this.shadowRoot.querySelectorAll('[data-action="select-all"]').forEach(btn => {
       btn.addEventListener('click', (e) => {
+        interactionFlag.active = true;
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        if (this._isSaving) return;
+        if (this._isSaving) { interactionFlag.active = false; return; }
         this._selectAll(btn.dataset.device);
+        setTimeout(() => { interactionFlag.active = false; }, 300);
         return false;
       }, { passive: false });
     });
 
     this.shadowRoot.querySelectorAll('[data-action="clear-selection"]').forEach(btn => {
       btn.addEventListener('click', (e) => {
+        interactionFlag.active = true;
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        if (this._isSaving) return;
+        if (this._isSaving) { interactionFlag.active = false; return; }
         this._clearSelection(btn.dataset.device);
+        setTimeout(() => { interactionFlag.active = false; }, 300);
         return false;
       }, { passive: false });
     });
@@ -1938,12 +2054,20 @@ class AromaLinkScheduleCard extends HTMLElement {
         --cell-height: clamp(54px, 12vw, 68px);
       }
       
+      :host {
+        display: block;
+        /* Prevent scroll chaining - keeps scroll within the card */
+        overscroll-behavior: contain;
+      }
+      
       ha-card {
         background: var(--color-bg);
         border-radius: var(--radius);
         overflow: hidden;
         /* Prevent Safari touch behaviors that cause scroll issues */
         -webkit-overflow-scrolling: auto;
+        /* Prevent any scroll restoration weirdness */
+        overflow-anchor: none;
       }
       
       /* Prevent touch callout and tap highlight on interactive elements */
@@ -1953,6 +2077,15 @@ class AromaLinkScheduleCard extends HTMLElement {
         touch-action: manipulation;
         user-select: none;
         -webkit-user-select: none;
+        cursor: pointer;
+        /* iOS: prevent scroll-to-top on double-tap */
+        -webkit-touch-action: manipulation;
+      }
+      
+      /* Prevent body scroll when interacting with card on iOS */
+      .diffuser-card:active,
+      .diffuser-card:focus-within {
+        touch-action: pan-x pan-y;
       }
       
       .diffuser-card {
