@@ -64,7 +64,8 @@ class GateConfig:
     # cycle, so brief flickers would reset diffusion cadence). Separate knobs
     # because their natural scales differ: HVAC rests are minutes; "hold after
     # the room empties" can reasonably be an hour.
-    hvac_off_delay_minutes: int = 2
+    # 0 = gate closes the moment air stops (default since 3.1.1).
+    hvac_off_delay_minutes: int = 0
     occupancy_off_delay_minutes: int = 2
     gating_mode: str = GATING_POWER
 
@@ -78,7 +79,9 @@ class GateConfig:
             occupancy_entity=gates.get("occupancy_entity") or None,
             motion_entities=list(gates.get("motion_entities") or []),
             hvac_on_delay_minutes=int(gates.get("hvac_on_delay_minutes", 1)),
-            hvac_off_delay_minutes=int(gates.get("hvac_off_delay_minutes", legacy_off)),
+            hvac_off_delay_minutes=int(
+                gates.get("hvac_off_delay_minutes", gates.get("off_delay_minutes", 0))
+            ),
             occupancy_off_delay_minutes=int(
                 gates.get("occupancy_off_delay_minutes", legacy_off)
             ),
