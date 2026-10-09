@@ -319,6 +319,14 @@ class AromaLinkStore:
         self._device(device_id)["last_power"] = bool(power)
         self._schedule_save()
 
+    def get_last_fan(self, device_id: str) -> bool | None:
+        value = self._device(device_id).get("last_fan")
+        return None if value is None else bool(value)
+
+    def set_last_fan(self, device_id: str, fan: bool) -> None:
+        self._device(device_id)["last_fan"] = bool(fan)
+        self._schedule_save()
+
     # ------------------------------------------------------------- slot gating
 
     def get_slots_gated(self, device_id: str) -> bool:

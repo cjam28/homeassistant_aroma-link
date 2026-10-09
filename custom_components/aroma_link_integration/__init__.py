@@ -142,13 +142,17 @@ CARD_URL_PREFIX = f"/{DOMAIN}_card"
 
 
 def _power_persister(store: AromaLinkStore, device_id: str, coordinator):
-    """Coordinator listener that persists power-state changes."""
+    """Coordinator listener that persists power/fan state changes."""
 
     @callback
     def _persist() -> None:
-        state = (coordinator.data or {}).get("state")
+        data = coordinator.data or {}
+        state = data.get("state")
         if state is not None and store.get_last_power(device_id) != bool(state):
             store.set_last_power(device_id, bool(state))
+        fan = data.get("fan_state")
+        if fan is not None and store.get_last_fan(device_id) != bool(fan):
+            store.set_last_fan(device_id, bool(fan))
 
     return _persist
 
@@ -447,6 +451,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         last_power = al_store.get_last_power(device_id)
         if last_power is not None and isinstance(coordinator.data, dict):
             coordinator.data["state"] = last_power
+        last_fan = al_store.get_last_fan(device_id)
+        if last_fan is not None and isinstance(coordinator.data, dict):
+            coordinator.data["fan_state"] = last_fan
 
         # First refresh: a failure no longer drops the device — it stays
         # registered so entities appear (unavailable) and recover on a later
