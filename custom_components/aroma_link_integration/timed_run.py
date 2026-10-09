@@ -8,9 +8,11 @@ already passed while HA was down). While a run is active:
   regardless of schedule windows,
 - the gating engine sees the persisted run and holds power ON until expiry.
 
-Expiry turns the device off and clears the overlay; cancel keeps the device
-running (matching the old semantics) but clears the run and overlay so the
-gating engine resumes ownership on its next evaluation.
+Expiry clears the overlay and the run, then hands power back: with the
+schedule enabled the gating engine decides (a run inside an active window
+keeps diffusing — fork issue #2); otherwise the pre-run power state is
+restored. Cancel keeps the device running but clears the run and overlay so
+the gating engine resumes ownership on its next evaluation.
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
 
-from .models import RunOverlay
+from .models import RunOverlay, timed_run_expiry_power
 from .store import AromaLinkStore, TimedRunState
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +93,15 @@ class TimedRunManager:
 
         self._disarm(device_id)
 
+        # Remember the pre-run power state; a replacement run keeps the
+        # original one so expiry restores what the user had before any run.
+        previous = self._store.get_timed_run(device_id)
+        if previous is not None:
+            prior_power = previous.prior_power
+        else:
+            state = (coordinator.data or {}).get("state")
+            prior_power = None if state is None else bool(state)
+
         model = self._store.get_model(device_id)
         work = int(work_sec) if work_sec else model.default_work_sec
         pause = int(pause_sec) if pause_sec else model.default_pause_sec
@@ -103,6 +114,7 @@ class TimedRunManager:
                 work_sec=work,
                 pause_sec=pause,
                 duration_minutes=int(duration_minutes),
+                prior_power=prior_power,
             ),
         )
 
@@ -177,12 +189,26 @@ class TimedRunManager:
             cancel()
 
     async def _expire(self, device_id: str) -> None:
-        reconciler = self._reconcilers.get(str(device_id))
+        device_id = str(device_id)
+        run = self._store.get_timed_run(device_id)
+        reconciler = self._reconcilers.get(device_id)
         if reconciler:
-            # Disarm the overlay BEFORE the off command so the device cannot
+            # Disarm the overlay BEFORE any power command so the device cannot
             # re-activate itself in the gap (upstream issue #31 lesson).
             await reconciler.async_set_overlay(None)
-        coordinator = self._coordinators.get(str(device_id))
-        if coordinator:
-            await coordinator.turn_on_off(False)
-        await self._store.async_set_timed_run(str(device_id), None)
+        # Clearing the run fires the "timed_run" change -> engine re-evaluates.
+        await self._store.async_set_timed_run(device_id, None)
+        model = self._store.get_model(device_id)
+        power = timed_run_expiry_power(
+            model.schedule_enabled, run.prior_power if run else None
+        )
+        coordinator = self._coordinators.get(device_id)
+        if coordinator and power is not None:
+            current = (coordinator.data or {}).get("state")
+            if current is None or bool(current) != power:
+                await coordinator.turn_on_off(power)
+        _LOGGER.info(
+            "Timed run for device %s expired; power %s",
+            device_id,
+            "handed to gating engine" if power is None else ("restored on" if power else "off"),
+        )
