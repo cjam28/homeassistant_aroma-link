@@ -291,3 +291,16 @@ def test_device_model_roundtrip():
     # JSON round-trip safety (Store serializes to JSON)
     import json
     assert DeviceModel.from_dict(json.loads(json.dumps(m.to_dict()))).to_dict() == m.to_dict()
+
+
+def test_timed_run_expiry_hands_power_to_engine_when_scheduled():
+    # Fork issue #2: a run inside an active window must not cut the device off.
+    assert models.timed_run_expiry_power(True, True) is None
+    assert models.timed_run_expiry_power(True, False) is None
+    assert models.timed_run_expiry_power(True, None) is None
+
+
+def test_timed_run_expiry_restores_prior_power_when_hands_off():
+    assert models.timed_run_expiry_power(False, True) is True
+    assert models.timed_run_expiry_power(False, False) is False
+    assert models.timed_run_expiry_power(False, None) is False  # pre-3.0.8 run

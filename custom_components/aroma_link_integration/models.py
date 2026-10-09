@@ -507,3 +507,16 @@ def night_owl_period(model: DeviceModel, now: datetime) -> bool:
     if owner is None:
         return False
     return model.schedule.days[owner].night_owl
+
+
+def timed_run_expiry_power(schedule_enabled: bool, prior_power: bool | None) -> bool | None:
+    """Power command to send when a timed run expires (None = send nothing).
+
+    With the schedule enabled the gating engine owns power and re-evaluates
+    once the run clears, so a run inside an active window no longer cuts the
+    device off (fork issue #2). Hands-off devices go back to their pre-run
+    state; an unknown prior state (run stored before 3.0.8) means off.
+    """
+    if schedule_enabled:
+        return None
+    return bool(prior_power)

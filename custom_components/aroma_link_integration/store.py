@@ -71,6 +71,9 @@ class TimedRunState:
     work_sec: int | None = None
     pause_sec: int | None = None
     duration_minutes: int | None = None
+    # Power state before the run started; restored on expiry when the gating
+    # engine is hands-off (schedule disabled). None = unknown (pre-3.0.8 run).
+    prior_power: bool | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -78,6 +81,7 @@ class TimedRunState:
             "work_sec": self.work_sec,
             "pause_sec": self.pause_sec,
             "duration_minutes": self.duration_minutes,
+            "prior_power": self.prior_power,
         }
 
     @classmethod
@@ -89,6 +93,7 @@ class TimedRunState:
             work_sec=data.get("work_sec"),
             pause_sec=data.get("pause_sec"),
             duration_minutes=data.get("duration_minutes"),
+            prior_power=data.get("prior_power"),
         )
 
 
