@@ -133,17 +133,35 @@ async def async_setup(hass: HomeAssistant, config: dict):
     return True
 
 
+CARD_FILE = "aroma-link-schedule-card.js"
+# Content-hashed mount for the card module graph. Relative sub-module imports
+# (./al-model.js, ./vendor/...) resolve under the same hashed prefix, so any
+# asset change busts the WHOLE graph — not just the entry file a ?v= query
+# would cover (TASK-8: stale cached sub-modules -> Lovelace config error).
+CARD_URL_PREFIX = f"/{DOMAIN}_card"
+
+
 async def _register_static_path(hass: HomeAssistant):
-    """Serve the whole www/ directory (card entry module + submodules + vendor)."""
+    """Serve www/ (card entry module + submodules + vendor)."""
     www_path = os.path.join(os.path.dirname(__file__), "www")
     if not os.path.isdir(www_path):
         _LOGGER.warning("Card assets directory missing at %s", www_path)
         return
+    file_hash = await hass.async_add_executor_job(_hash_card_assets, www_path)
+    hass.data[DOMAIN]["card_hash"] = file_hash
+    paths = [
+        # Legacy unversioned mount, kept for resources registered pre-3.0.9.
+        StaticPathConfig(f"/{DOMAIN}", www_path, cache_headers=False),
+    ]
+    if file_hash:
+        paths.append(
+            StaticPathConfig(
+                f"{CARD_URL_PREFIX}/{file_hash}", www_path, cache_headers=False
+            )
+        )
     try:
-        await hass.http.async_register_static_paths([
-            StaticPathConfig(f"/{DOMAIN}", www_path, cache_headers=False)
-        ])
-        _LOGGER.debug("Registered static path /%s -> %s", DOMAIN, www_path)
+        await hass.http.async_register_static_paths(paths)
+        _LOGGER.debug("Registered card static paths -> %s (hash %s)", www_path, file_hash)
     except Exception as e:
         _LOGGER.warning(f"Failed to register static path: {e}")
 
@@ -165,20 +183,21 @@ def _hash_card_assets(www_path: str) -> str | None:
 
 async def _register_lovelace_resource(hass: HomeAssistant):
     """Register the card as a Lovelace resource (after HA is fully started)."""
-    www_path = os.path.join(os.path.dirname(__file__), "www")
-    card_file = "aroma-link-schedule-card.js"
-    if not os.path.exists(os.path.join(www_path, card_file)):
+    file_hash = hass.data.get(DOMAIN, {}).get("card_hash")
+    if not file_hash:
         return
-
-    file_hash = await hass.async_add_executor_job(_hash_card_assets, www_path)
-    if file_hash is None:
-        return
-
-    versioned_url = f"/{DOMAIN}/{card_file}?v={file_hash}"
     try:
-        await _add_lovelace_resource(hass, versioned_url)
+        await _add_lovelace_resource(hass, f"{CARD_URL_PREFIX}/{file_hash}/{CARD_FILE}")
     except Exception as e:
         _LOGGER.warning(f"Failed to add Lovelace resource: {e}")
+
+
+def _is_card_resource(url: str) -> bool:
+    """True for any URL this integration ever registered for the card."""
+    path = url.split("?")[0]
+    return path.endswith(f"/{CARD_FILE}") and (
+        path.startswith(f"/{DOMAIN}/") or path.startswith(f"{CARD_URL_PREFIX}/")
+    )
 
 
 async def _add_lovelace_resource(hass: HomeAssistant, url_path: str):
@@ -203,13 +222,11 @@ async def _add_lovelace_resource(hass: HomeAssistant, url_path: str):
         )
         return
 
-    base_url = url_path.split("?")[0]
-
     existing_item = None
     try:
         for item in resources_collection.async_items():
             item_url = item.get("url", "")
-            if item_url.split("?")[0] == base_url:
+            if _is_card_resource(item_url):
                 existing_item = item
                 break
     except Exception as e:
