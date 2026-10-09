@@ -24,6 +24,10 @@ Thumbs.db
 # Claude Code local (machine-specific) settings — never committed
 .claude/settings.local.json
 
+# Codex local config — MCP hub endpoints + absolute hook paths; never committed
+# (AGENTS.md IS committed — it mirrors CLAUDE.md)
+.codex/
+
 # Worktree convention: one workstream = one branch = one worktree under .worktrees/
 .worktrees/
 
