@@ -468,6 +468,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             al_store,
             device_id,
             GateConfig.from_options(entry.options, device_id),
+            reconciler=reconcilers.get(device_id),
         )
 
     # Store change notifications -> the ONE bus event + engine re-evaluation.

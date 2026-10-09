@@ -304,3 +304,35 @@ def test_timed_run_expiry_restores_prior_power_when_hands_off():
     assert models.timed_run_expiry_power(False, True) is True
     assert models.timed_run_expiry_power(False, False) is False
     assert models.timed_run_expiry_power(False, None) is False  # pre-3.0.8 run
+
+
+def test_compile_week_gated_off_disarms_all_but_overlay():
+    model = model_with(days={Weekday.MON: DaySchedule(windows=[w("09:00", "21:00")])})
+    gated = compile_week(model, gated_off=True)
+    assert all(slot.enabled == 0 for slots in gated.values() for slot in slots)
+    # Timed-run overlay survives gating (runs outrank gates).
+    run = compile_week(
+        model, overlay=RunOverlay(work_sec=10, pause_sec=60),
+        overlay_day=Weekday.MON, gated_off=True,
+    )
+    assert run[Weekday.MON][models.NIGHT_OWL_SLOT_INDEX].enabled == 1
+    assert run[Weekday.MON][0].enabled == 0
+    # Ungated compile is unchanged.
+    assert compile_week(model)[Weekday.MON][0].enabled == 1
+
+
+def test_gating_plan_power_mode_drives_power_only():
+    assert models.gating_plan("power", True, "window") == (True, False)
+    assert models.gating_plan("power", False, "window") == (False, False)
+    assert models.gating_plan("power", None, "hands_off") == (None, False)
+
+
+def test_gating_plan_slots_mode_holds_power_and_flips_slots():
+    assert models.gating_plan("slots", True, "window") == (True, False)
+    assert models.gating_plan("slots", False, "window") == (True, True)
+    assert models.gating_plan("slots", False, "night_owl") == (True, True)
+    assert models.gating_plan("slots", True, "timed_run") == (True, False)
+    # Outside windows: power held, slots left as they are.
+    assert models.gating_plan("slots", False, "outside") == (True, None)
+    # Hands-off: never leave the user's schedule disarmed.
+    assert models.gating_plan("slots", None, "hands_off") == (None, False)

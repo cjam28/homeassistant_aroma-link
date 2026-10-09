@@ -303,6 +303,20 @@ class AromaLinkStore:
         if notify:
             self._notify(str(device_id), "oil", None)
 
+    # ------------------------------------------------------------- slot gating
+
+    def get_slots_gated(self, device_id: str) -> bool:
+        """True while schedule-flip gating has the device's slots disarmed.
+
+        Persisted so a restart (or a switch back to power gating) knows the
+        device may still hold disarmed slots and re-arms them.
+        """
+        return bool(self._device(device_id).get("slots_gated", False))
+
+    async def async_set_slots_gated(self, device_id: str, gated: bool) -> None:
+        self._device(device_id)["slots_gated"] = bool(gated)
+        self._schedule_save()
+
     # ------------------------------------------------------------- timed runs
 
     def get_timed_run(self, device_id: str) -> TimedRunState | None:
