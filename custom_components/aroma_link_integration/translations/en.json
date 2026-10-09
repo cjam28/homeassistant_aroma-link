@@ -57,12 +57,24 @@
           "motion_entities": "Night Owl motion sensors (linked area)",
           "hvac_on_delay_minutes": "HVAC on-delay (minutes): air must circulate this long before diffusing STARTS",
           "hvac_off_delay_minutes": "HVAC off-delay (minutes): keep diffusing this long after air STOPS — absorbs short HVAC rests between cycles",
-          "occupancy_off_delay_minutes": "Occupancy off-delay (minutes): keep diffusing this long after the area reads EMPTY — absorbs brief presence gaps"
+          "occupancy_off_delay_minutes": "Occupancy off-delay (minutes): keep diffusing this long after the area reads EMPTY — absorbs brief presence gaps",
+          "gating_mode": "Gating mode: how a closed gate stops diffusion"
+        },
+        "data_description": {
+          "gating_mode": "Power: switch the device off and on (the device beeps on every toggle). Schedule flip: keep power on and disarm/re-arm the schedule slots instead. Silent, but each gate change is a cloud schedule write that takes about 20 s to land, and power stays on while the schedule is enabled."
         }
       }
     },
     "abort": {
       "no_devices": "No devices found on this entry."
+    }
+  },
+  "selector": {
+    "gating_mode": {
+      "options": {
+        "power": "Power (switch on/off)",
+        "slots": "Schedule flip (keep power on, toggle schedule slots)"
+      }
     }
   }
 }

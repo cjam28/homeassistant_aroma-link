@@ -4,7 +4,8 @@ Compiles the persisted DeviceModel into the 5-slot wire format and pushes it,
 serialized per device, with verify-after-write tuned to the cloud's slow
 (15-20 s) acknowledgement. Runtime gating never calls this module: power is
 the runtime lever; slots change only when the model changes (or drift is
-detected against what we believe the device holds).
+detected against what we believe the device holds), or — in schedule-flip
+gating mode — when the engine gates the slots on/off (async_set_slots_gated).
 """
 from __future__ import annotations
 
@@ -138,6 +139,18 @@ class ScheduleReconciler:
         self._overlay_day = today(_now(self._hass)) if overlay else None
         self.async_request_sync("overlay" if overlay else "overlay_cleared")
 
+    async def async_set_slots_gated(self, gated: bool) -> None:
+        """Disarm (True) or re-arm (False) all schedule slots; push on change."""
+        if self._store.get_slots_gated(self._device_id) == bool(gated):
+            return
+        await self._store.async_set_slots_gated(self._device_id, gated)
+        _LOGGER.info(
+            "Device %s schedule slots %s (schedule-flip gating)",
+            self._device_id,
+            "disarmed" if gated else "re-armed",
+        )
+        self.async_request_sync("slots_gated" if gated else "slots_armed")
+
     async def async_check_drift(self, force_push: bool = False) -> bool:
         """Read all 7 days and resync when the device disagrees with the model.
 
@@ -191,7 +204,12 @@ class ScheduleReconciler:
 
     def _compiled(self) -> dict[Weekday, list[CloudSlot]]:
         model = self._store.get_model(self._device_id)
-        return compile_week(model, overlay=self._overlay, overlay_day=self._overlay_day)
+        return compile_week(
+            model,
+            overlay=self._overlay,
+            overlay_day=self._overlay_day,
+            gated_off=self._store.get_slots_gated(self._device_id),
+        )
 
     async def _sync_loop(self) -> None:
         try:

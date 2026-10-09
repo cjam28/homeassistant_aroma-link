@@ -3,7 +3,8 @@
 ``scheduled_on`` is now TRUTHFUL: on means the device power is on AND the
 current time is inside an armed capability window (a normal schedule window,
 the Night Owl period, or a timed-run overlay) — i.e. the device is actually
-allowed to be diffusing right now.
+allowed to be diffusing right now. Windows disarmed by schedule-flip gating
+don't count.
 """
 from datetime import timedelta
 
@@ -77,6 +78,10 @@ class AromaLinkScheduledOnSensor(AromaLinkEntity, BinarySensorEntity):
         reconciler = (entry_data.get("reconcilers") or {}).get(str(self._device_id))
         if reconciler is not None and reconciler.overlay is not None:
             return "timed_run", None
+
+        # Schedule-flip gating disarmed every window/Night Owl slot.
+        if self._store.get_slots_gated(self._device_id):
+            return None, None
 
         window_hit = active_window(model, now)
         if window_hit is not None:

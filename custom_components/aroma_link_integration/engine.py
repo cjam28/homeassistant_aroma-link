@@ -1,8 +1,8 @@
 """GatingEngine — native replacement for the three legacy blueprints.
 
 Computes the desired POWER state from the schedule model and the configured
-gates, and idempotently commands the device. It never touches schedule slots
-(the reconciler owns those): power is the runtime lever, and because the
+gates, and idempotently commands the device. Slot writes stay in the
+reconciler: in the default power mode, power is the runtime lever, and because the
 device only diffuses when power is on AND inside an armed slot window, power
 gating yields the same behavior the old enabled-bit rewrites attempted —
 without the whole-day write races.
@@ -18,6 +18,13 @@ Decision, evaluated on every trigger (state change, coordinator poll tick,
 
 Gates are per-device config-entry options; unconfigured gates pass.
 Transitions are at worst ~60 s late (interval tick) — acceptable for scent.
+
+Gating mode (per device):
+    power (default)  -> the decision drives the power switch, as above.
+    slots ("schedule flip") -> power is held ON while the engine owns the
+        device and the decision instead disarms/re-arms the schedule slots
+        via the reconciler. Avoids the device's beep on every power toggle,
+        at the cost of a cloud schedule write (~20 s to land) per gate change.
 """
 from __future__ import annotations
 
@@ -33,7 +40,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import EVENT_UPDATED
-from .models import active_window, night_owl_period
+from .models import GATING_MODES, GATING_POWER, active_window, gating_plan, night_owl_period
 from .store import AromaLinkStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +66,7 @@ class GateConfig:
     # the room empties" can reasonably be an hour.
     hvac_off_delay_minutes: int = 2
     occupancy_off_delay_minutes: int = 2
+    gating_mode: str = GATING_POWER
 
     @classmethod
     def from_options(cls, options: dict, device_id: str) -> "GateConfig":
@@ -73,6 +81,11 @@ class GateConfig:
             hvac_off_delay_minutes=int(gates.get("hvac_off_delay_minutes", legacy_off)),
             occupancy_off_delay_minutes=int(
                 gates.get("occupancy_off_delay_minutes", legacy_off)
+            ),
+            gating_mode=(
+                gates.get("gating_mode")
+                if gates.get("gating_mode") in GATING_MODES
+                else GATING_POWER
             ),
         )
 
@@ -97,8 +110,10 @@ class GatingEngine:
         store: AromaLinkStore,
         device_id: str,
         config: GateConfig,
+        reconciler=None,
     ) -> None:
         self._hass = hass
+        self._reconciler = reconciler
         self._coordinator = coordinator
         self._store = store
         self._device_id = str(device_id)
@@ -286,7 +301,11 @@ class GatingEngine:
 
     def snapshot(self) -> dict:
         """Last decision context (for the scheduled_on attributes / ws status)."""
-        return dict(self._snapshot)
+        return {
+            **self._snapshot,
+            "mode": self._config.gating_mode,
+            "slots_gated": self._store.get_slots_gated(self._device_id),
+        }
 
     def _broadcast_gating(self, desired) -> None:
         """Announce gate-state changes so the card can render them live."""
@@ -303,9 +322,17 @@ class GatingEngine:
 
     async def async_evaluate(self, reason: str = "tick") -> None:
         desired = self.desired_power()
+        power, slots_gated = gating_plan(
+            self._config.gating_mode, desired, self._snapshot.get("decision")
+        )
+        if slots_gated is not None and self._reconciler is not None:
+            await self._reconciler.async_set_slots_gated(slots_gated)
+        self._snapshot["mode"] = self._config.gating_mode
+        self._snapshot["slots_gated"] = self._store.get_slots_gated(self._device_id)
         self._broadcast_gating(desired)
-        if desired is None:
+        if power is None:
             return
+        desired = power
 
         current = self._coordinator.data.get("state")
         if current is None or bool(current) == desired:

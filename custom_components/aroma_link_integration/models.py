@@ -354,11 +354,16 @@ def compile_week(
     model: DeviceModel,
     overlay: RunOverlay | None = None,
     overlay_day: Weekday | None = None,
+    gated_off: bool = False,
 ) -> dict[Weekday, list[CloudSlot]]:
     """Compile the model into 7 days x 5 CloudSlots.
 
     ``overlay`` (timed run) replaces slot 5 on ``overlay_day`` with a 24/7
     enabled window so power-on always diffuses during the run.
+
+    ``gated_off`` (schedule-flip gating) disarms every window and Night Owl
+    slot so a powered-on device stays idle without a power toggle; the timed
+    run overlay is applied afterwards and is never disarmed.
     """
     compiled: dict[Weekday, list[CloudSlot]] = {}
     for day in Weekday:
@@ -366,6 +371,8 @@ def compile_week(
         while len(slots) < MAX_WINDOWS:
             slots.append(FILLER_SLOT)
         slots.append(_night_owl_slot(model, day))
+        if gated_off:
+            slots = [replace(slot, enabled=0) for slot in slots]
         compiled[day] = slots
 
     if overlay is not None and overlay_day is not None:
@@ -520,3 +527,30 @@ def timed_run_expiry_power(schedule_enabled: bool, prior_power: bool | None) -> 
     if schedule_enabled:
         return None
     return bool(prior_power)
+
+
+GATING_POWER = "power"
+GATING_SLOTS = "slots"
+GATING_MODES = (GATING_POWER, GATING_SLOTS)
+
+
+def gating_plan(mode: str, desired: bool | None, decision: str | None):
+    """Map an engine decision to (power_command, slots_gated) for a gating mode.
+
+    Either element may be None, meaning "leave as is".
+
+    power mode: power follows the decision; slots are never gated.
+    slots mode (schedule flip): power is held ON while the engine owns the
+    device and the gate is applied by disarming slots, so the device never
+    beeps for a gate change. Outside every window the slots are left as they
+    are (nothing is armed for "now" anyway), which avoids two extra writes a
+    day; hands-off (schedule disabled) always re-arms so the user's schedule
+    runs as written.
+    """
+    if mode != GATING_SLOTS:
+        return desired, False
+    if desired is None:
+        return None, False
+    if decision == "outside":
+        return True, None
+    return True, not desired

@@ -55,6 +55,9 @@ Settings → Devices & Services → Aroma-Link → **Configure** → *Diffusing 
 - **HVAC gate** — pick a `climate` entity; scheduled windows only diffuse while its `hvac_action` shows air moving (sustained for the configured delay)
 - **Occupancy gate** — pick a `binary_sensor`; windows only diffuse while it is `on`
 - **Night Owl motion sensors** — pick the motion sensors of the linked area
+- **Gating mode** — how a closed gate stops diffusion:
+  - *Power* (default): the device is switched off and back on. Many units beep on every power toggle.
+  - *Schedule flip*: power stays on while the schedule is enabled, and the integration disarms/re-arms the device's schedule slots instead. No power toggles, but each gate change is a cloud schedule write that takes ~20 s to land (the card briefly shows the schedule syncing).
 
 Leave any gate empty to disable it. `switch.<name>_schedule_active` ("Schedule Enabled") is the master: turn it off to take manual control of power. Note: while it is on, manual power flips are corrected within ~a minute — use a timed run for ad-hoc diffusing.
 
