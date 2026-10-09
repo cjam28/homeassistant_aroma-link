@@ -191,3 +191,8 @@ cursor_auth_ssl_failure_workaround.md
 .mcp.json
 # public repo: automation traces + climate CSV exports are local diagnostics
 traces/
+# Dev-scaffold symlink (local-only; breaks clones/deploys if committed)
+_shared
+# HA log exports + Claude Code agent worktrees
+home-assistant_*.log
+.claude/worktrees/
