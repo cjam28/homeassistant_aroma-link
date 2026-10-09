@@ -58,11 +58,13 @@
           "hvac_on_delay_minutes": "HVAC on-delay (minutes): air must circulate this long before diffusing STARTS",
           "hvac_off_delay_minutes": "HVAC off-delay (minutes, 0 = off): keep diffusing this long after air STOPS",
           "occupancy_off_delay_minutes": "Occupancy off-delay (minutes): keep diffusing this long after the area reads EMPTY — absorbs brief presence gaps",
-          "gating_mode": "Gating mode (Schedule flip = no beeping)"
+          "gating_mode": "Gating mode (Schedule flip = no beeping)",
+          "keep_fan_on": "Keep the diffuser fan on"
         },
         "data_description": {
-          "gating_mode": "How the device is paused when a gate closes (HVAC stops, area empty, or no motion for Night Owl). Power: switches the device off and back on. Most units BEEP on every power toggle, so with HVAC gating that can mean dozens of beeps a day. Schedule flip (recommended to stop the beeping): keeps the device powered on and pauses it by switching its schedule slots off and back on instead. No power toggles, so no beeps. Each pause or resume is a cloud schedule update that takes about 20 seconds to reach the device, and the power switch stays on while the schedule is enabled. Applies to both scheduled windows and Night Owl.",
-          "hvac_off_delay_minutes": "0 (default) stops diffusing as soon as the HVAC fan stops. Raise it to ride through short rests between HVAC cycles."
+          "gating_mode": "How the device is paused when a gate closes (HVAC stops, area empty, or no motion for Night Owl). Power: switches the device off and back on. Most units BEEP on every power toggle, so with HVAC gating that can mean dozens of beeps a day. Schedule flip (default, stops the beeping): keeps the device powered on and pauses it by switching its schedule slots off and back on instead. No power toggles, so no beeps. Each pause or resume is a cloud schedule update that takes about 20 seconds to reach the device, and the power switch stays on while the schedule is enabled. Applies to both scheduled windows and Night Owl.",
+          "hvac_off_delay_minutes": "0 (default) stops diffusing as soon as the HVAC fan stops. Raise it to ride through short rests between HVAC cycles. Leaving it unchecked also means 0.",
+          "keep_fan_on": "On (default): the diffuser's built-in fan is switched on whenever the integration has it diffusing, to push scent further. Turn off to control the fan yourself."
         }
       }
     },

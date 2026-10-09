@@ -16,7 +16,7 @@ import logging
 import os
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
@@ -139,6 +139,22 @@ CARD_FILE = "aroma-link-schedule-card.js"
 # asset change busts the WHOLE graph — not just the entry file a ?v= query
 # would cover (TASK-8: stale cached sub-modules -> Lovelace config error).
 CARD_URL_PREFIX = f"/{DOMAIN}_card"
+
+
+def _power_persister(store: AromaLinkStore, device_id: str, coordinator):
+    """Coordinator listener that persists power/fan state changes."""
+
+    @callback
+    def _persist() -> None:
+        data = coordinator.data or {}
+        state = data.get("state")
+        if state is not None and store.get_last_power(device_id) != bool(state):
+            store.set_last_power(device_id, bool(state))
+        fan = data.get("fan_state")
+        if fan is not None and store.get_last_fan(device_id) != bool(fan):
+            store.set_last_fan(device_id, bool(fan))
+
+    return _persist
 
 
 async def _register_static_path(hass: HomeAssistant):
@@ -429,6 +445,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             coordinator._apply_oil_state(oil_state)
         coordinator.schedule_provider = functools.partial(al_store.get_model, device_id)
 
+        # Restore the last known power state BEFORE the first refresh: the
+        # refresh carries state forward (deviceInfo has no live on/off), so
+        # the default "off" would otherwise make the engine re-send ON (beep).
+        last_power = al_store.get_last_power(device_id)
+        if last_power is not None and isinstance(coordinator.data, dict):
+            coordinator.data["state"] = last_power
+        last_fan = al_store.get_last_fan(device_id)
+        if last_fan is not None and isinstance(coordinator.data, dict):
+            coordinator.data["fan_state"] = last_fan
+
         # First refresh: a failure no longer drops the device — it stays
         # registered so entities appear (unavailable) and recover on a later
         # poll (upstream bdbaea2).
@@ -443,6 +469,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             await _cleanup_old_helpers(hass, coordinator.device_name)
         except Exception as e:
             _LOGGER.warning(f"Failed to cleanup old helpers: {e}")
+
+        entry.async_on_unload(
+            coordinator.async_add_listener(
+                _power_persister(al_store, device_id, coordinator)
+            )
+        )
 
         if device_id not in unmanaged:
             reconcilers[device_id] = ScheduleReconciler(

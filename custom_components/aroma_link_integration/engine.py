@@ -20,8 +20,8 @@ Gates are per-device config-entry options; unconfigured gates pass.
 Transitions are at worst ~60 s late (interval tick) — acceptable for scent.
 
 Gating mode (per device):
-    power (default)  -> the decision drives the power switch, as above.
-    slots ("schedule flip") -> power is held ON while the engine owns the
+    power            -> the decision drives the power switch, as above.
+    slots ("schedule flip", default) -> power is held ON while the engine owns the
         device and the decision instead disarms/re-arms the schedule slots
         via the reconciler. Avoids the device's beep on every power toggle,
         at the cost of a cloud schedule write (~20 s to land) per gate change.
@@ -40,7 +40,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import EVENT_UPDATED
-from .models import GATING_MODES, GATING_POWER, active_window, gating_plan, night_owl_period
+from .models import GATING_MODES, GATING_SLOTS, active_window, gating_plan, night_owl_period
 from .store import AromaLinkStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,7 +67,10 @@ class GateConfig:
     # 0 = gate closes the moment air stops (default since 3.1.1).
     hvac_off_delay_minutes: int = 0
     occupancy_off_delay_minutes: int = 2
-    gating_mode: str = GATING_POWER
+    # Default since 3.1.2: schedule flip (no power-toggle beeps).
+    gating_mode: str = GATING_SLOTS
+    # Keep the diffuser's own fan on whenever the engine wants it diffusing.
+    keep_fan_on: bool = True
 
     @classmethod
     def from_options(cls, options: dict, device_id: str) -> "GateConfig":
@@ -88,8 +91,9 @@ class GateConfig:
             gating_mode=(
                 gates.get("gating_mode")
                 if gates.get("gating_mode") in GATING_MODES
-                else GATING_POWER
+                else GATING_SLOTS
             ),
+            keep_fan_on=bool(gates.get("keep_fan_on", True)),
         )
 
     @property
@@ -125,6 +129,7 @@ class GatingEngine:
         self._hvac_active_since: datetime | None = None
         self._last_commanded: bool | None = None
         self._last_commanded_at: datetime | None = None
+        self._last_fan_at: datetime | None = None
         self._snapshot: dict = {}
         self._last_broadcast: dict | None = None
         self._hvac_false_since: datetime | None = None
@@ -276,6 +281,20 @@ class GatingEngine:
         self._snapshot = {"decision": "outside"}
         return False
 
+    async def _ensure_fan_on(self, reason: str) -> None:
+        """Turn the diffuser's fan on if it is believed off (settle-shielded)."""
+        if self._coordinator.data.get("fan_state"):
+            return
+        now = dt_util.utcnow()
+        if (
+            self._last_fan_at is not None
+            and now - self._last_fan_at < timedelta(seconds=COMMAND_SETTLE_SECONDS)
+        ):
+            return
+        self._last_fan_at = now
+        _LOGGER.info("Gating engine turning device %s fan on (%s)", self._device_id, reason)
+        await self._coordinator.fan_control(True)
+
     def _hvac_action(self) -> str | None:
         if not self._config.climate_entity:
             return None
@@ -335,8 +354,15 @@ class GatingEngine:
         self._broadcast_gating(desired)
         if power is None:
             return
-        desired = power
+        # Fan follows the diffusing decision, not the held-on power of
+        # schedule-flip mode (no point running the fan outside windows); it
+        # is applied after any power command so it isn't sent to an off unit.
+        want_fan = bool(desired) and self._config.keep_fan_on
+        await self._apply_power(power, reason)
+        if want_fan and self._coordinator.data.get("state"):
+            await self._ensure_fan_on(reason)
 
+    async def _apply_power(self, desired: bool, reason: str) -> None:
         current = self._coordinator.data.get("state")
         if current is None or bool(current) == desired:
             return

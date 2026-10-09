@@ -303,6 +303,30 @@ class AromaLinkStore:
         if notify:
             self._notify(str(device_id), "oil", None)
 
+    # ------------------------------------------------------------- power state
+
+    def get_last_power(self, device_id: str) -> bool | None:
+        """Last known device power state, persisted across restarts.
+
+        The cloud's deviceInfo no longer reports live on/off, so without this
+        a restart would assume "off" and the gating engine would send a
+        redundant ON (the device beeps) — or never turn off a running device.
+        """
+        value = self._device(device_id).get("last_power")
+        return None if value is None else bool(value)
+
+    def set_last_power(self, device_id: str, power: bool) -> None:
+        self._device(device_id)["last_power"] = bool(power)
+        self._schedule_save()
+
+    def get_last_fan(self, device_id: str) -> bool | None:
+        value = self._device(device_id).get("last_fan")
+        return None if value is None else bool(value)
+
+    def set_last_fan(self, device_id: str, fan: bool) -> None:
+        self._device(device_id)["last_fan"] = bool(fan)
+        self._schedule_save()
+
     # ------------------------------------------------------------- slot gating
 
     def get_slots_gated(self, device_id: str) -> bool:

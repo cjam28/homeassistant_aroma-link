@@ -428,7 +428,8 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
                 "occupancy_off_delay_minutes": user_input.get(
                     "occupancy_off_delay_minutes", 2
                 ),
-                "gating_mode": user_input.get("gating_mode", "power"),
+                "gating_mode": user_input.get("gating_mode", "slots"),
+                "keep_fan_on": user_input.get("keep_fan_on", True),
             }
             new_options = {**self._config_entry.options, "gates": gates_all}
             return self.async_create_entry(title="", data=new_options)
@@ -436,7 +437,7 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
         schema = {
             vol.Optional(
                 "gating_mode",
-                default=current.get("gating_mode", "power"),
+                default=current.get("gating_mode", "slots"),
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=["power", "slots"],
@@ -444,6 +445,10 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
                     mode=selector.SelectSelectorMode.LIST,
                 )
             ),
+            vol.Optional(
+                "keep_fan_on",
+                default=current.get("keep_fan_on", True),
+            ): selector.BooleanSelector(),
             vol.Optional(
                 "climate_entity",
                 description={"suggested_value": current.get("climate_entity")},

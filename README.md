@@ -56,8 +56,9 @@ Settings → Devices & Services → Aroma-Link → **Configure** → *Diffusing 
 - **Occupancy gate** — pick a `binary_sensor`; windows only diffuse while it is `on`
 - **Night Owl motion sensors** — pick the motion sensors of the linked area
 - **Gating mode** — how a closed gate stops diffusion:
-  - *Power* (default): the device is switched off and back on. Many units beep on every power toggle.
-  - *Schedule flip* (stops the beeping): power stays on while the schedule is enabled, and the integration disarms/re-arms the device's schedule slots instead. No power toggles, so no beeps. Applies to scheduled windows and Night Owl. Each gate change is a cloud schedule write that takes ~20 s to land (the card briefly shows the schedule syncing).
+  - *Power*: the device is switched off and back on. Many units beep on every power toggle.
+  - *Schedule flip* (default; stops the beeping): power stays on while the schedule is enabled, and the integration disarms/re-arms the device's schedule slots instead. No power toggles, so no beeps. Applies to scheduled windows and Night Owl. Each gate change is a cloud schedule write that takes ~20 s to land (the card briefly shows the schedule syncing).
+- **Keep the diffuser fan on** — default on: the unit's built-in fan is switched on whenever the integration has it diffusing
 - **HVAC off-delay** — minutes to keep diffusing after air stops; defaults to 0 (stop as soon as the HVAC fan stops)
 
 Leave any gate empty to disable it. `switch.<name>_schedule_active` ("Schedule Enabled") is the master: turn it off to take manual control of power. Note: while it is on, manual power flips are corrected within ~a minute — use a timed run for ad-hoc diffusing.
