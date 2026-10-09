@@ -424,7 +424,7 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
                 "occupancy_entity": user_input.get("occupancy_entity") or None,
                 "motion_entities": user_input.get("motion_entities") or [],
                 "hvac_on_delay_minutes": user_input.get("hvac_on_delay_minutes", 1),
-                "hvac_off_delay_minutes": user_input.get("hvac_off_delay_minutes", 2),
+                "hvac_off_delay_minutes": user_input.get("hvac_off_delay_minutes", 0),
                 "occupancy_off_delay_minutes": user_input.get(
                     "occupancy_off_delay_minutes", 2
                 ),
@@ -469,7 +469,7 @@ class AromaLinkOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(
                 "hvac_off_delay_minutes",
                 default=current.get(
-                    "hvac_off_delay_minutes", current.get("off_delay_minutes", 2)
+                    "hvac_off_delay_minutes", current.get("off_delay_minutes", 0)
                 ),
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=240)),
             vol.Optional(
