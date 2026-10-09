@@ -1,9 +1,10 @@
 ---
 id: TASK-10
 title: Verify schedule-flip gating is silent on hardware (Villa 164 Pool House)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-09 17:48'
+updated_date: '2026-10-09 18:10'
 labels:
   - v3
   - gating
@@ -25,3 +26,11 @@ v3.1.0 added a per-device "Schedule flip" gating mode: power is held on and a cl
 - [ ] #2 Diffusion stops within about 1 minute of the gate closing and resumes after it opens
 - [ ] #3 Schedule sync returns to synced after each flip (no persistent error)
 <!-- AC:END -->
+
+
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-09 18:07 UTC, first live test on Main House (419931) in Schedule flip mode, not Pool House: the gate closed when the Ecobee fan stopped (hvac_action fan -> idle). The engine set slots_gated=true and power stayed on (power last changed 17:50). User heard NO beep on gate close. Still pending: confirm the device actually stopped misting (work 10 s / pause 200 s, so within ~3.5 min), and test gate re-open (no beep, misting resumes).
+<!-- SECTION:NOTES:END -->
